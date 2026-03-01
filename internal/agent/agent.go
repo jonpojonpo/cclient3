@@ -208,19 +208,19 @@ func (c *blockCollector) OnContentBlockStart(index int, block api.ResponseBlock)
 
 func (c *blockCollector) OnTextDelta(index int, text string) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if index < len(c.blocks) {
 		c.blocks[index].text += text
 	}
+	c.mu.Unlock()
 	c.msgChan <- display.TextDeltaMsg{Text: text}
 }
 
 func (c *blockCollector) OnThinkingDelta(index int, thinking string) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if index < len(c.blocks) {
 		c.blocks[index].text += thinking
 	}
+	c.mu.Unlock()
 	c.msgChan <- display.ThinkingDeltaMsg{Thinking: thinking}
 }
 
@@ -294,32 +294,87 @@ func (c *blockCollector) toolCalls() []tools.ToolCall {
 	return calls
 }
 
-// RunSingleTurn runs a single non-interactive prompt and prints the response.
+// RunSingleTurn runs a single non-interactive prompt, executing tool calls
+// in a loop until the model produces a final text response.
 func (a *Agent) RunSingleTurn(ctx context.Context, prompt string) (string, error) {
 	a.conversation.AddUser(prompt)
 
-	req := &api.Request{
-		Model:       a.config.Model,
-		MaxTokens:   a.config.MaxTokens,
-		Temperature: a.config.Temperature,
-		System:      a.config.SystemPrompt,
-		Messages:    a.conversation.Messages,
-		Tools:       a.registry.APIDefs(),
-	}
-
-	resp, err := a.client.SendMessage(ctx, req)
-	if err != nil {
-		return "", err
-	}
-
-	var text string
-	for _, block := range resp.Content {
-		if block.Type == "text" {
-			text += block.Text
+	for {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
 		}
-	}
 
-	return text, nil
+		req := &api.Request{
+			Model:       a.config.Model,
+			MaxTokens:   a.config.MaxTokens,
+			Temperature: a.config.Temperature,
+			System:      a.config.SystemPrompt,
+			Messages:    a.conversation.Messages,
+			Tools:       a.registry.APIDefs(),
+		}
+
+		resp, err := a.client.SendMessage(ctx, req)
+		if err != nil {
+			return "", err
+		}
+
+		// Convert ResponseBlocks to ContentBlocks for conversation history
+		var contentBlocks []api.ContentBlock
+		var text string
+		var toolCalls []tools.ToolCall
+		for _, block := range resp.Content {
+			switch block.Type {
+			case "text":
+				contentBlocks = append(contentBlocks, api.ContentBlock{
+					Type: "text",
+					Text: block.Text,
+				})
+				text += block.Text
+			case "thinking":
+				contentBlocks = append(contentBlocks, api.ContentBlock{
+					Type:     "thinking",
+					Thinking: block.Thinking,
+				})
+			case "tool_use":
+				contentBlocks = append(contentBlocks, api.ContentBlock{
+					Type:  "tool_use",
+					ID:    block.ID,
+					Name:  block.Name,
+					Input: block.Input,
+				})
+				toolCalls = append(toolCalls, tools.ToolCall{
+					ID:    block.ID,
+					Name:  block.Name,
+					Input: block.Input,
+				})
+			}
+		}
+		a.conversation.AddAssistant(contentBlocks)
+
+		if len(toolCalls) == 0 {
+			return text, nil
+		}
+
+		// Execute tools
+		results := a.executor.ExecuteAll(ctx, toolCalls)
+
+		var toolResultBlocks []api.ContentBlock
+		for _, r := range results {
+			content := r.Result.Output
+			if r.Result.Error != "" {
+				content = r.Result.Error
+			}
+			toolResultBlocks = append(toolResultBlocks, api.ContentBlock{
+				Type:      "tool_result",
+				ToolUseID: r.Call.ID,
+				Content:   content,
+				IsError:   r.Result.IsError,
+			})
+		}
+
+		a.conversation.AddToolResults(toolResultBlocks)
+		// Loop back for next response
+	}
 }
 
 // SetModel changes the active model.

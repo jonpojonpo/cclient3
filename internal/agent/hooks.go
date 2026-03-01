@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/jonpo/cclient3/internal/tools"
@@ -40,6 +41,37 @@ func (h *HookRegistry) CheckPreToolUse(call tools.ToolCall) string {
 	return ""
 }
 
+// normalizeCommand strips common evasion techniques from a command string.
+// Removes backslash-escaping within words, collapses whitespace, strips
+// leading sudo/env/nohup prefixes, and lowercases everything.
+func normalizeCommand(cmd string) string {
+	cmd = strings.ToLower(strings.TrimSpace(cmd))
+
+	// Remove backslash escapes within words (r\m -> rm)
+	cmd = strings.ReplaceAll(cmd, "\\", "")
+
+	// Remove single/double quotes used to break up commands ('r'm -> rm)
+	cmd = strings.ReplaceAll(cmd, "'", "")
+	cmd = strings.ReplaceAll(cmd, "\"", "")
+
+	// Collapse whitespace
+	cmd = regexp.MustCompile(`\s+`).ReplaceAllString(cmd, " ")
+
+	// Strip common command prefixes (sudo, env, nohup, etc.)
+	for {
+		trimmed := cmd
+		for _, prefix := range []string{"sudo ", "env ", "nohup ", "bash -c ", "sh -c "} {
+			trimmed = strings.TrimPrefix(trimmed, prefix)
+		}
+		if trimmed == cmd {
+			break
+		}
+		cmd = trimmed
+	}
+
+	return cmd
+}
+
 // DefaultBashSafetyHook blocks dangerous bash commands.
 func DefaultBashSafetyHook() PreToolUseHook {
 	dangerous := []string{
@@ -49,19 +81,18 @@ func DefaultBashSafetyHook() PreToolUseHook {
 		"mkfs",
 		":(){ :|:& };:",
 		"> /dev/sda",
-		"chmod -R 777 /",
+		"chmod -r 777 /",
+		"chmod 777 /",
 		"mv / ",
+		"rm -rf ~",
 	}
 
-	// Patterns for piped execution: "wget ... | sh", "curl ... | bash" etc.
-	pipePatterns := []struct {
-		prefix string
-		suffix string
-	}{
-		{"wget ", "| sh"},
-		{"wget ", "| bash"},
-		{"curl ", "| sh"},
-		{"curl ", "| bash"},
+	// Regex patterns for more complex evasions
+	dangerousPatterns := []*regexp.Regexp{
+		// Pipe from network to shell
+		regexp.MustCompile(`(curl|wget)\s+.*\|\s*(ba)?sh`),
+		// Recursive force-remove on root-like paths
+		regexp.MustCompile(`rm\s+(-[a-z]*r[a-z]*\s+(-[a-z]+\s+)*|(-[a-z]+\s+)*-[a-z]*r[a-z]*\s+)/`),
 	}
 
 	return func(call tools.ToolCall) string {
@@ -71,15 +102,16 @@ func DefaultBashSafetyHook() PreToolUseHook {
 		if err := json.Unmarshal(call.Input, &params); err != nil {
 			return ""
 		}
-		cmd := strings.ToLower(strings.TrimSpace(params.Command))
+		cmd := normalizeCommand(params.Command)
+
 		for _, d := range dangerous {
 			if strings.Contains(cmd, d) {
 				return fmt.Sprintf("BLOCKED: dangerous command detected (%s)", d)
 			}
 		}
-		for _, p := range pipePatterns {
-			if strings.Contains(cmd, p.prefix) && strings.Contains(cmd, p.suffix) {
-				return fmt.Sprintf("BLOCKED: dangerous pipe pattern (%s...%s)", p.prefix, p.suffix)
+		for _, p := range dangerousPatterns {
+			if p.MatchString(cmd) {
+				return fmt.Sprintf("BLOCKED: dangerous command pattern detected (%s)", p.String())
 			}
 		}
 		return ""

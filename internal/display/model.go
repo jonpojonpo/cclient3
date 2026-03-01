@@ -38,6 +38,9 @@ type Model struct {
 	currentText     strings.Builder
 	currentThinking strings.Builder
 
+	// Markdown rendering
+	mdRenderer *rendererCache
+
 	// Config
 	theme        Theme
 	model        string
@@ -67,6 +70,7 @@ func NewModel(themeName, modelName string) *Model {
 	return &Model{
 		state:        stateIdle,
 		textInput:    ti,
+		mdRenderer:   newRendererCache(),
 		theme:        theme,
 		model:        modelName,
 		InputChan:    make(chan string, 1),
@@ -123,7 +127,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case tea.KeyPgDown:
 			m.scrollPos += 5
-			m.scrollToBottom()
+			if m.scrollPos > len(m.history) {
+				m.scrollPos = len(m.history)
+			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -315,12 +321,18 @@ func (m *Model) View() string {
 }
 
 func (m *Model) scrollToBottom() {
-	maxScroll := len(m.history)
-	if m.scrollPos > maxScroll {
-		m.scrollPos = maxScroll
-	}
+	m.scrollPos = len(m.history)
 }
 
 func (m *Model) visibleHistory() []historyEntry {
-	return m.history
+	// scrollPos represents how many entries from the end are visible as the "bottom".
+	// We show entries from max(0, scrollPos-maxVisible) to scrollPos.
+	end := m.scrollPos
+	if end > len(m.history) {
+		end = len(m.history)
+	}
+	if end <= 0 {
+		return nil
+	}
+	return m.history[:end]
 }

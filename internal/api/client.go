@@ -89,10 +89,12 @@ func (c *Client) SendMessage(ctx context.Context, req *Request) (*Response, erro
 	return &result, nil
 }
 
-// ListModels fetches all available models from the Anthropic API, handling pagination.
+// ListModels fetches all available models from the API, handling pagination.
+// Derives the models endpoint from the configured messages endpoint.
 func (c *Client) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	var allModels []ModelInfo
-	baseURL := "https://api.anthropic.com/v1/models"
+	// Derive models URL from the configured endpoint (e.g. ".../v1/messages" -> ".../v1/models")
+	baseURL := strings.TrimSuffix(c.endpoint, "/messages") + "/models"
 	afterID := ""
 
 	for {

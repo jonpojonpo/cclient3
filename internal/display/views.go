@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -49,7 +48,7 @@ func (m *Model) renderAssistantPanel(text string) string {
 	return label + "\n" + style.Render(content)
 }
 
-// renderMarkdown renders markdown text using glamour with theme-appropriate styling.
+// renderMarkdown renders markdown text using glamour with theme-matched styling.
 func (m *Model) renderMarkdown(text string) string {
 	// Content width inside the panel border + padding
 	contentWidth := m.width - 8
@@ -57,13 +56,7 @@ func (m *Model) renderMarkdown(text string) string {
 		contentWidth = 40
 	}
 
-	r, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
-		glamour.WithWordWrap(contentWidth),
-	)
-	if err != nil {
-		return text
-	}
+	r := m.mdRenderer.Get(m.theme.Name, contentWidth)
 
 	rendered, err := r.Render(text)
 	if err != nil {
@@ -121,7 +114,7 @@ func (m *Model) renderToolPanel(name, id string, result *string, isError bool) s
 		if len(r) > 500 {
 			r = r[:500] + "\n... (truncated)"
 		}
-		content = r
+		content = m.renderMarkdown(r)
 	}
 
 	return label + "\n" + style.Render(content)
