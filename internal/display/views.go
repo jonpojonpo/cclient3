@@ -114,7 +114,9 @@ func (m *Model) renderToolPanel(name, id string, result *string, isError bool) s
 		if len(r) > 500 {
 			r = r[:500] + "\n... (truncated)"
 		}
-		content = m.renderMarkdown(r)
+		// Wrap tool output in a code fence so glamour preserves
+		// newlines and applies syntax highlighting as preformatted text.
+		content = m.renderMarkdown("```\n" + r + "\n```")
 	}
 
 	return label + "\n" + style.Render(content)
