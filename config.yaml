@@ -1,0 +1,10 @@
+model: claude-sonnet-4-6
+max_tokens: 8192
+temperature: 0.7
+theme: cyber
+max_tool_concurrency: 6
+bash_timeout: 120
+api_endpoint: https://api.anthropic.com/v1/messages
+system_prompt: |
+  You are a helpful AI assistant with access to tools for reading, writing, and searching files,
+  running bash commands, and more. Use tools when appropriate to help the user.
