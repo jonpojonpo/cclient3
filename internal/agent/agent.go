@@ -72,15 +72,8 @@ func (a *Agent) Run(ctx context.Context, userInput string) error {
 			return ctx.Err()
 		}
 
-		// Build request
-		req := &api.Request{
-			Model:       a.config.Model,
-			MaxTokens:   a.config.MaxTokens,
-			Temperature: a.config.Temperature,
-			System:      a.config.SystemPrompt,
-			Messages:    a.conversation.Messages,
-			Tools:       a.registry.APIDefs(),
-		}
+		// Build request with prompt caching
+		req := a.buildRequest()
 
 		// Stream response
 		collector := newBlockCollector(a.msgChan)
@@ -90,10 +83,12 @@ func (a *Agent) Run(ctx context.Context, userInput string) error {
 			return err
 		}
 
-		// Send token update
+		// Send token update (includes cache stats)
 		a.send(display.TokenUpdateMsg{
-			InputTokens:  collector.usage.InputTokens,
-			OutputTokens: collector.usage.OutputTokens,
+			InputTokens:              collector.usage.InputTokens,
+			OutputTokens:             collector.usage.OutputTokens,
+			CacheCreationInputTokens: collector.usage.CacheCreationInputTokens,
+			CacheReadInputTokens:     collector.usage.CacheReadInputTokens,
 		})
 
 		// Add assistant message to conversation
@@ -160,6 +155,75 @@ func (a *Agent) Run(ctx context.Context, userInput string) error {
 
 		a.conversation.AddToolResults(toolResultBlocks)
 		// Loop back for next response
+	}
+}
+
+// buildRequest constructs an API request with prompt caching markers.
+// Cache control is applied to: system prompt, last tool, and the second-to-last
+// user message to maximize cache hits across turns.
+func (a *Agent) buildRequest() *api.Request {
+	ephemeral := &api.CacheControl{Type: "ephemeral"}
+
+	// System prompt as a cacheable block
+	system := []api.SystemBlock{{
+		Type:         "text",
+		Text:         a.config.SystemPrompt,
+		CacheControl: ephemeral,
+	}}
+
+	// Tools with cache_control on the last one
+	tools := a.registry.APIDefs()
+	if len(tools) > 0 {
+		tools[len(tools)-1].CacheControl = ephemeral
+	}
+
+	// Deep copy messages and apply cache_control to the second-to-last user turn.
+	// This ensures all prior conversation context is cached between turns.
+	messages := make([]api.Message, len(a.conversation.Messages))
+	copy(messages, a.conversation.Messages)
+	applyCacheToMessages(messages)
+
+	return &api.Request{
+		Model:       a.config.Model,
+		MaxTokens:   a.config.MaxTokens,
+		Temperature: a.config.Temperature,
+		System:      system,
+		Messages:    messages,
+		Tools:       tools,
+	}
+}
+
+// applyCacheToMessages adds cache_control to the last content block of the
+// second-to-last user message, marking the conversation prefix as cacheable.
+func applyCacheToMessages(messages []api.Message) {
+	// Find the second-to-last user message
+	userCount := 0
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" {
+			userCount++
+			if userCount == 2 {
+				markLastBlock(&messages[i])
+				return
+			}
+		}
+	}
+}
+
+// markLastBlock adds cache_control to the last content block of a message.
+func markLastBlock(msg *api.Message) {
+	switch content := msg.Content.(type) {
+	case []api.ContentBlock:
+		if len(content) > 0 {
+			content[len(content)-1].CacheControl = &api.CacheControl{Type: "ephemeral"}
+			msg.Content = content
+		}
+	case string:
+		// Convert string content to block form so we can add cache_control
+		msg.Content = []api.ContentBlock{{
+			Type:         "text",
+			Text:         content,
+			CacheControl: &api.CacheControl{Type: "ephemeral"},
+		}}
 	}
 }
 
@@ -304,15 +368,7 @@ func (a *Agent) RunSingleTurn(ctx context.Context, prompt string) (string, error
 			return "", ctx.Err()
 		}
 
-		req := &api.Request{
-			Model:       a.config.Model,
-			MaxTokens:   a.config.MaxTokens,
-			Temperature: a.config.Temperature,
-			System:      a.config.SystemPrompt,
-			Messages:    a.conversation.Messages,
-			Tools:       a.registry.APIDefs(),
-		}
-
+		req := a.buildRequest()
 		resp, err := a.client.SendMessage(ctx, req)
 		if err != nil {
 			return "", err

@@ -4,14 +4,26 @@ import "encoding/json"
 
 // --- Request types ---
 
+// CacheControl marks a block for prompt caching.
+type CacheControl struct {
+	Type string `json:"type"` // "ephemeral"
+}
+
 type Request struct {
 	Model       string          `json:"model"`
 	MaxTokens   int             `json:"max_tokens"`
 	Temperature float64         `json:"temperature,omitempty"`
-	System      string          `json:"system,omitempty"`
+	System      interface{}     `json:"system,omitempty"` // string or []SystemBlock
 	Messages    []Message       `json:"messages"`
 	Tools       []ToolDef       `json:"tools,omitempty"`
 	Stream      bool            `json:"stream"`
+}
+
+// SystemBlock is a content block for the system prompt (used when cache_control is needed).
+type SystemBlock struct {
+	Type         string        `json:"type"`
+	Text         string        `json:"text"`
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
 }
 
 type Message struct {
@@ -37,12 +49,16 @@ type ContentBlock struct {
 	ToolUseID string `json:"tool_use_id,omitempty"`
 	Content   string `json:"content,omitempty"`
 	IsError   bool   `json:"is_error,omitempty"`
+
+	// prompt caching
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
 }
 
 type ToolDef struct {
-	Name        string      `json:"name"`
-	Description string      `json:"description"`
-	InputSchema interface{} `json:"input_schema"`
+	Name         string        `json:"name"`
+	Description  string        `json:"description"`
+	InputSchema  interface{}   `json:"input_schema"`
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
 }
 
 // --- Response types ---
@@ -74,8 +90,10 @@ type ResponseBlock struct {
 }
 
 type Usage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
 }
 
 // --- Streaming event types ---

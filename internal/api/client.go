@@ -188,6 +188,7 @@ func (c *Client) setHeaders(req *http.Request) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", c.apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
 }
 
 func (c *Client) parseError(resp *http.Response) error {

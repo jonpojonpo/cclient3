@@ -28,8 +28,10 @@ type ErrorMsg struct {
 }
 
 type TokenUpdateMsg struct {
-	InputTokens  int
-	OutputTokens int
+	InputTokens              int
+	OutputTokens             int
+	CacheCreationInputTokens int
+	CacheReadInputTokens     int
 }
 
 type SpinnerTickMsg struct{}

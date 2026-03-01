@@ -28,8 +28,8 @@ type Model struct {
 	// TUI state
 	state      displayState
 	textInput  textinput.Model
-	history    []historyEntry
-	scrollPos  int
+	history       []historyEntry
+	scrollOffset  int // lines scrolled up from bottom (0 = pinned to bottom)
 	width      int
 	height     int
 	spinnerIdx int
@@ -46,6 +46,11 @@ type Model struct {
 	model        string
 	inputTokens  int
 	outputTokens int
+	cacheCreated int
+	cacheRead    int
+
+	// Cached banner (invalidated on theme/model change)
+	bannerText string
 
 	// Channel for sending user input to the agent
 	InputChan chan string
@@ -121,14 +126,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case tea.KeyPgUp:
-			m.scrollPos -= 5
-			if m.scrollPos < 0 {
-				m.scrollPos = 0
-			}
+			m.scrollOffset += m.height / 2
 		case tea.KeyPgDown:
-			m.scrollPos += 5
-			if m.scrollPos > len(m.history) {
-				m.scrollPos = len(m.history)
+			m.scrollOffset -= m.height / 2
+			if m.scrollOffset < 0 {
+				m.scrollOffset = 0
+			}
+		}
+
+	case tea.MouseMsg:
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			m.scrollOffset += 3
+		case tea.MouseButtonWheelDown:
+			m.scrollOffset -= 3
+			if m.scrollOffset < 0 {
+				m.scrollOffset = 0
 			}
 		}
 
@@ -200,16 +213,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case TokenUpdateMsg:
 		m.inputTokens = msg.InputTokens
 		m.outputTokens = msg.OutputTokens
+		m.cacheCreated = msg.CacheCreationInputTokens
+		m.cacheRead = msg.CacheReadInputTokens
 		cmds = append(cmds, m.waitForAgentMsg())
 
 	case SetThemeMsg:
 		if t, ok := Themes[msg.Name]; ok {
 			m.theme = t
+			m.bannerText = "" // invalidate banner cache
 		}
 		cmds = append(cmds, m.waitForAgentMsg())
 
 	case SetModelMsg:
 		m.model = msg.Name
+		m.bannerText = "" // invalidate banner cache
 		cmds = append(cmds, m.waitForAgentMsg())
 
 	case StatusMsg:
@@ -233,7 +250,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ClearMsg:
 		m.history = nil
-		m.scrollPos = 0
+		m.scrollOffset = 0
 		cmds = append(cmds, m.waitForAgentMsg())
 
 	case QuitMsg:
@@ -258,12 +275,11 @@ func (m *Model) View() string {
 
 	var sections []string
 
-	// Banner
-	banner := lipgloss.NewStyle().
-		Foreground(m.theme.Primary).
-		Bold(true).
-		Render(fmt.Sprintf("  cclient3 [%s]", m.model))
-	sections = append(sections, banner)
+	// Banner — only render once and cache it
+	if m.bannerText == "" {
+		m.bannerText = Banner(m.theme, m.model)
+	}
+	sections = append(sections, m.bannerText)
 
 	// History
 	for _, entry := range m.visibleHistory() {
@@ -294,8 +310,24 @@ func (m *Model) View() string {
 	inputHeight := 2
 	available := m.height - statusBarHeight - inputHeight - 1
 	bodyLines := strings.Split(body, "\n")
+
+	// Clamp scrollOffset to valid range
+	maxOffset := len(bodyLines) - available
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if m.scrollOffset > maxOffset {
+		m.scrollOffset = maxOffset
+	}
+
 	if len(bodyLines) > available && available > 0 {
-		bodyLines = bodyLines[len(bodyLines)-available:]
+		// Show a window: lines from [end-available-scrollOffset, end-scrollOffset]
+		end := len(bodyLines) - m.scrollOffset
+		start := end - available
+		if start < 0 {
+			start = 0
+		}
+		bodyLines = bodyLines[start:end]
 	}
 	body = strings.Join(bodyLines, "\n")
 
@@ -321,18 +353,9 @@ func (m *Model) View() string {
 }
 
 func (m *Model) scrollToBottom() {
-	m.scrollPos = len(m.history)
+	m.scrollOffset = 0
 }
 
 func (m *Model) visibleHistory() []historyEntry {
-	// scrollPos represents how many entries from the end are visible as the "bottom".
-	// We show entries from max(0, scrollPos-maxVisible) to scrollPos.
-	end := m.scrollPos
-	if end > len(m.history) {
-		end = len(m.history)
-	}
-	if end <= 0 {
-		return nil
-	}
-	return m.history[:end]
+	return m.history
 }

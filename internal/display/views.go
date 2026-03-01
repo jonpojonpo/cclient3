@@ -151,9 +151,19 @@ func (m *Model) renderStatusBar() string {
 
 	left := modelStyle.Render(m.model)
 	middle := themeStyle.Render(fmt.Sprintf("[%s]", m.theme.Name))
-	right := tokenStyle.Render(fmt.Sprintf("tokens: %d/%d", m.inputTokens, m.outputTokens))
 
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(middle) - lipgloss.Width(right) - 2
+	scrollInfo := ""
+	if m.scrollOffset > 0 {
+		scrollInfo = lipgloss.NewStyle().Foreground(th.Accent).Render(fmt.Sprintf(" [+%d] ", m.scrollOffset))
+	}
+
+	tokenInfo := fmt.Sprintf("tokens: %d/%d", m.inputTokens, m.outputTokens)
+	if m.cacheRead > 0 || m.cacheCreated > 0 {
+		tokenInfo += fmt.Sprintf(" cache: %d/%d", m.cacheRead, m.cacheCreated)
+	}
+	right := tokenStyle.Render(tokenInfo)
+
+	gap := m.width - lipgloss.Width(left) - lipgloss.Width(middle) - lipgloss.Width(scrollInfo) - lipgloss.Width(right) - 2
 	if gap < 1 {
 		gap = 1
 	}
@@ -161,7 +171,7 @@ func (m *Model) renderStatusBar() string {
 	bar := lipgloss.NewStyle().
 		Width(m.width).
 		Background(lipgloss.Color("#1a1a1a")).
-		Render(left + strings.Repeat(" ", gap/2) + middle + strings.Repeat(" ", gap-gap/2) + right)
+		Render(left + strings.Repeat(" ", gap/2) + middle + strings.Repeat(" ", gap-gap/2) + scrollInfo + right)
 
 	return bar
 }
