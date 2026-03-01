@@ -210,19 +210,24 @@ func applyCacheToMessages(messages []api.Message) {
 }
 
 // markLastBlock adds cache_control to the last content block of a message.
+// It creates a copy to avoid mutating the original conversation data.
 func markLastBlock(msg *api.Message) {
+	ephemeral := &api.CacheControl{Type: "ephemeral"}
 	switch content := msg.Content.(type) {
 	case []api.ContentBlock:
 		if len(content) > 0 {
-			content[len(content)-1].CacheControl = &api.CacheControl{Type: "ephemeral"}
-			msg.Content = content
+			// Deep copy the blocks so we don't mutate conversation history
+			blocks := make([]api.ContentBlock, len(content))
+			copy(blocks, content)
+			blocks[len(blocks)-1].CacheControl = ephemeral
+			msg.Content = blocks
 		}
 	case string:
 		// Convert string content to block form so we can add cache_control
 		msg.Content = []api.ContentBlock{{
 			Type:         "text",
 			Text:         content,
-			CacheControl: &api.CacheControl{Type: "ephemeral"},
+			CacheControl: ephemeral,
 		}}
 	}
 }
@@ -312,6 +317,19 @@ func (c *blockCollector) OnError(err error) {
 	c.msgChan <- display.ErrorMsg{Err: err}
 }
 
+// safeRawJSON returns a valid json.RawMessage from a string buffer.
+// Falls back to "{}" if the buffer is empty or invalid JSON.
+func safeRawJSON(buf string) json.RawMessage {
+	if buf == "" {
+		return json.RawMessage("{}")
+	}
+	raw := json.RawMessage(buf)
+	if !json.Valid(raw) {
+		return json.RawMessage("{}")
+	}
+	return raw
+}
+
 func (c *blockCollector) buildAssistantBlocks() []api.ContentBlock {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -334,7 +352,7 @@ func (c *blockCollector) buildAssistantBlocks() []api.ContentBlock {
 				Type:  "tool_use",
 				ID:    b.id,
 				Name:  b.name,
-				Input: json.RawMessage(b.jsonBuf),
+				Input: safeRawJSON(b.jsonBuf),
 			})
 		}
 	}
@@ -351,7 +369,7 @@ func (c *blockCollector) toolCalls() []tools.ToolCall {
 			calls = append(calls, tools.ToolCall{
 				ID:    b.id,
 				Name:  b.name,
-				Input: json.RawMessage(b.jsonBuf),
+				Input: safeRawJSON(b.jsonBuf),
 			})
 		}
 	}
@@ -392,16 +410,17 @@ func (a *Agent) RunSingleTurn(ctx context.Context, prompt string) (string, error
 					Thinking: block.Thinking,
 				})
 			case "tool_use":
+				input := safeRawJSON(string(block.Input))
 				contentBlocks = append(contentBlocks, api.ContentBlock{
 					Type:  "tool_use",
 					ID:    block.ID,
 					Name:  block.Name,
-					Input: block.Input,
+					Input: input,
 				})
 				toolCalls = append(toolCalls, tools.ToolCall{
 					ID:    block.ID,
 					Name:  block.Name,
-					Input: block.Input,
+					Input: input,
 				})
 			}
 		}
