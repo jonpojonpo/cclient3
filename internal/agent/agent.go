@@ -11,6 +11,7 @@ import (
 	"github.com/jonpo/cclient3/internal/api"
 	"github.com/jonpo/cclient3/internal/config"
 	"github.com/jonpo/cclient3/internal/display"
+	"github.com/jonpo/cclient3/internal/skills"
 	"github.com/jonpo/cclient3/internal/tools"
 )
 
@@ -21,6 +22,7 @@ type Agent struct {
 	registry     *tools.Registry
 	executor     *tools.Executor
 	hooks        *HookRegistry
+	skillsMgr    *skills.Manager
 	msgChan      chan tea.Msg
 }
 
@@ -35,6 +37,7 @@ func NewAgent(cfg *config.Config, msgChan chan tea.Msg) *Agent {
 	registry.Register(tools.NewFileEditTool())
 	registry.Register(tools.NewGlobTool())
 	registry.Register(tools.NewGrepTool())
+	registry.Register(tools.NewWebFetchTool())
 
 	// Set up hooks
 	hooks := NewHookRegistry()
@@ -47,6 +50,7 @@ func NewAgent(cfg *config.Config, msgChan chan tea.Msg) *Agent {
 		registry:     registry,
 		executor:     tools.NewExecutor(registry, cfg.MaxToolConcurrency),
 		hooks:        hooks,
+		skillsMgr:    skills.NewManager(),
 		msgChan:      msgChan,
 	}
 }
@@ -57,6 +61,11 @@ func (a *Agent) Client() *api.Client {
 
 func (a *Agent) Conversation() *Conversation {
 	return a.conversation
+}
+
+// Skills returns the skills manager for use by commands.
+func (a *Agent) Skills() *skills.Manager {
+	return a.skillsMgr
 }
 
 func (a *Agent) Config() *config.Config {
@@ -167,11 +176,14 @@ func (a *Agent) Run(ctx context.Context, userInput string) error {
 func (a *Agent) buildRequest() *api.Request {
 	ephemeral := &api.CacheControl{Type: "ephemeral"}
 
-	// Breakpoint 1: system prompt (with cwd context)
+	// Breakpoint 1: system prompt (with cwd context and active skills)
 	cwd, _ := os.Getwd()
 	systemText := a.config.SystemPrompt
 	if cwd != "" {
 		systemText += fmt.Sprintf("\n\nCurrent working directory: %s", cwd)
+	}
+	if skillContent := a.skillsMgr.ActiveContent(); skillContent != "" {
+		systemText += "\n\n" + skillContent
 	}
 	system := []api.SystemBlock{{
 		Type:         "text",

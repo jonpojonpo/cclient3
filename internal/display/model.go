@@ -34,6 +34,11 @@ type Model struct {
 	height     int
 	spinnerIdx int
 
+	// Input history (up/down arrow recall)
+	inputHistory []string
+	historyIdx   int    // -1 = not navigating history
+	savedInput   string // saved draft when navigating history
+
 	// Current streaming state
 	currentText     strings.Builder
 	currentThinking strings.Builder
@@ -82,6 +87,7 @@ func NewModel(themeName, modelName string) *Model {
 		AgentMsgChan: make(chan tea.Msg, 100),
 		width:        80,
 		height:       24,
+		historyIdx:   -1,
 	}
 }
 
@@ -115,10 +121,39 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyCtrlC:
 			m.quitting = true
 			return m, tea.Quit
+		case tea.KeyUp:
+			if m.state == stateIdle && len(m.inputHistory) > 0 {
+				if m.historyIdx == -1 {
+					m.savedInput = m.textInput.Value()
+					m.historyIdx = len(m.inputHistory) - 1
+				} else if m.historyIdx > 0 {
+					m.historyIdx--
+				}
+				m.textInput.SetValue(m.inputHistory[m.historyIdx])
+				m.textInput.CursorEnd()
+			}
+		case tea.KeyDown:
+			if m.state == stateIdle && m.historyIdx != -1 {
+				m.historyIdx++
+				if m.historyIdx >= len(m.inputHistory) {
+					m.historyIdx = -1
+					m.textInput.SetValue(m.savedInput)
+					m.savedInput = ""
+				} else {
+					m.textInput.SetValue(m.inputHistory[m.historyIdx])
+				}
+				m.textInput.CursorEnd()
+			}
 		case tea.KeyEnter:
 			if m.state == stateIdle {
 				text := strings.TrimSpace(m.textInput.Value())
 				if text != "" {
+					// Append to history (skip duplicate of last entry)
+					if len(m.inputHistory) == 0 || m.inputHistory[len(m.inputHistory)-1] != text {
+						m.inputHistory = append(m.inputHistory, text)
+					}
+					m.historyIdx = -1
+					m.savedInput = ""
 					m.textInput.SetValue("")
 					m.history = append(m.history, historyEntry{content: m.renderUserPanel(text)})
 					m.scrollToBottom()
