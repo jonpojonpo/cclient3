@@ -24,13 +24,25 @@ type Agent struct {
 	hooks        *HookRegistry
 	skillsMgr    *skills.Manager
 	msgChan      chan tea.Msg
+	// confirmChan receives the user's y/n response to a ConfirmRequestMsg.
+	confirmChan  chan bool
 }
 
 func NewAgent(cfg *config.Config, msgChan chan tea.Msg) *Agent {
 	client := api.NewClient(cfg.APIKey, cfg.APIEndpoint)
-	registry := tools.NewRegistry()
 
-	// Register all tools
+	// Child registry: all base tools, but NO sub_agent (prevents infinite recursion).
+	childRegistry := tools.NewRegistry()
+	childRegistry.Register(tools.NewBashTool(cfg.BashTimeout))
+	childRegistry.Register(tools.NewFileReadTool())
+	childRegistry.Register(tools.NewFileWriteTool())
+	childRegistry.Register(tools.NewFileEditTool())
+	childRegistry.Register(tools.NewGlobTool())
+	childRegistry.Register(tools.NewGrepTool())
+	childRegistry.Register(tools.NewWebFetchTool())
+
+	// Parent registry: all base tools + sub_agent.
+	registry := tools.NewRegistry()
 	registry.Register(tools.NewBashTool(cfg.BashTimeout))
 	registry.Register(tools.NewFileReadTool())
 	registry.Register(tools.NewFileWriteTool())
@@ -38,6 +50,7 @@ func NewAgent(cfg *config.Config, msgChan chan tea.Msg) *Agent {
 	registry.Register(tools.NewGlobTool())
 	registry.Register(tools.NewGrepTool())
 	registry.Register(tools.NewWebFetchTool())
+	registry.Register(NewSubAgentTool(client, cfg, childRegistry, msgChan))
 
 	// Set up hooks
 	hooks := NewHookRegistry()
@@ -52,7 +65,20 @@ func NewAgent(cfg *config.Config, msgChan chan tea.Msg) *Agent {
 		hooks:        hooks,
 		skillsMgr:    skills.NewManager(),
 		msgChan:      msgChan,
+		confirmChan:  make(chan bool, 1),
 	}
+}
+
+// ConfirmChan returns the channel the display writes to when the user
+// answers a confirmation dialog.
+func (a *Agent) ConfirmChan() chan bool {
+	return a.confirmChan
+}
+
+// askConfirm sends a confirmation request to the display and blocks until answered.
+func (a *Agent) askConfirm(prompt, command string) bool {
+	a.send(display.ConfirmRequestMsg{Prompt: prompt, Command: command})
+	return <-a.confirmChan
 }
 
 func (a *Agent) Client() *api.Client {
@@ -121,22 +147,30 @@ func (a *Agent) Run(ctx context.Context, userInput string) error {
 		var denied []tools.ToolCallResult
 
 		for _, tc := range toolCalls {
-			if reason := a.hooks.CheckPreToolUse(tc); reason != "" {
-				denied = append(denied, tools.ToolCallResult{
-					Call: tc,
-					Result: tools.ToolResult{
-						Error:   reason,
-						IsError: true,
-					},
-				})
-				a.send(display.ToolResultMsg{Result: tools.ToolCallResult{
-					Call:   tc,
-					Result: tools.ToolResult{Error: reason, IsError: true},
-				}})
-			} else {
+			reason := a.hooks.CheckPreToolUse(tc)
+			if reason == "" {
 				approved = append(approved, tc)
 				a.send(display.ToolStartMsg{ID: tc.ID, Name: tc.Name})
+				continue
 			}
+			// CONFIRM: prefix means "ask user rather than auto-block"
+			if len(reason) > 8 && reason[:8] == "CONFIRM:" {
+				prompt := reason[8:]
+				if a.askConfirm(prompt, tc.Name) {
+					approved = append(approved, tc)
+					a.send(display.ToolStartMsg{ID: tc.ID, Name: tc.Name})
+					continue
+				}
+				reason = "Denied by user"
+			}
+			denied = append(denied, tools.ToolCallResult{
+				Call:   tc,
+				Result: tools.ToolResult{Error: reason, IsError: true},
+			})
+			a.send(display.ToolResultMsg{Result: tools.ToolCallResult{
+				Call:   tc,
+				Result: tools.ToolResult{Error: reason, IsError: true},
+			}})
 		}
 
 		// Execute approved tools in parallel
@@ -175,6 +209,15 @@ func (a *Agent) Run(ctx context.Context, userInput string) error {
 // which leaves headroom and maximizes cache reuse across turns.
 func (a *Agent) buildRequest() *api.Request {
 	ephemeral := &api.CacheControl{Type: "ephemeral"}
+
+	// Trim conversation to fit context window (~190k tokens, reserving output budget).
+	contextBudget := 190000 - a.config.MaxTokens
+	if contextBudget < 10000 {
+		contextBudget = 10000
+	}
+	if dropped := a.conversation.TrimForWindow(contextBudget); dropped > 0 {
+		a.send(display.ContextTrimMsg{Dropped: dropped})
+	}
 
 	// Breakpoint 1: system prompt (with cwd context and active skills)
 	cwd, _ := os.Getwd()
@@ -317,7 +360,9 @@ func (c *blockCollector) OnTextDelta(index int, text string) {
 		c.blocks[index].text += text
 	}
 	c.mu.Unlock()
-	c.msgChan <- display.TextDeltaMsg{Text: text}
+	if c.msgChan != nil {
+		c.msgChan <- display.TextDeltaMsg{Text: text}
+	}
 }
 
 func (c *blockCollector) OnThinkingDelta(index int, thinking string) {
@@ -326,7 +371,9 @@ func (c *blockCollector) OnThinkingDelta(index int, thinking string) {
 		c.blocks[index].text += thinking
 	}
 	c.mu.Unlock()
-	c.msgChan <- display.ThinkingDeltaMsg{Thinking: thinking}
+	if c.msgChan != nil {
+		c.msgChan <- display.ThinkingDeltaMsg{Thinking: thinking}
+	}
 }
 
 func (c *blockCollector) OnInputJSONDelta(index int, partialJSON string) {
@@ -350,7 +397,9 @@ func (c *blockCollector) OnMessageDelta(delta api.MessageDelta, usage *api.Usage
 func (c *blockCollector) OnMessageStop() {}
 
 func (c *blockCollector) OnError(err error) {
-	c.msgChan <- display.ErrorMsg{Err: err}
+	if c.msgChan != nil {
+		c.msgChan <- display.ErrorMsg{Err: err}
+	}
 }
 
 // safeRawJSON returns a valid json.RawMessage from a string buffer.

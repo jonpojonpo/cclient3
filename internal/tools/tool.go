@@ -10,6 +10,9 @@ type ToolResult struct {
 	Output  string `json:"output,omitempty"`
 	Error   string `json:"error,omitempty"`
 	IsError bool   `json:"is_error,omitempty"`
+	// Lang is a syntax-highlighting hint (e.g. "go", "json", "python").
+	// Empty means no highlighting hint — display may still auto-detect.
+	Lang    string `json:"lang,omitempty"`
 }
 
 // Tool is the interface all tools must implement.

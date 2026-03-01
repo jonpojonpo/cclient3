@@ -103,6 +103,13 @@ func runInteractive(ctx context.Context, cfg *config.Config) {
 	// Create agent
 	ag := agent.NewAgent(cfg, m.AgentMsgChan)
 
+	// Wire the confirm channel: display writes to it, agent reads from it
+	go func() {
+		for v := range m.ConfirmChan {
+			ag.ConfirmChan() <- v
+		}
+	}()
+
 	// Create command registry
 	cmdReg := commands.NewRegistry()
 	commands.RegisterBuiltins(cmdReg, ag, m.AgentMsgChan)

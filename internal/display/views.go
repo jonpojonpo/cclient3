@@ -88,7 +88,7 @@ func (m *Model) renderThinkingPanel(text string) string {
 	return label + "\n" + style.Render(text)
 }
 
-func (m *Model) renderToolPanel(name, id string, result *string, isError bool) string {
+func (m *Model) renderToolPanel(name, id, lang string, result *string, isError bool) string {
 	th := m.theme
 	borderColor := th.Secondary
 	if isError {
@@ -111,15 +111,40 @@ func (m *Model) renderToolPanel(name, id string, result *string, isError bool) s
 		content = lipgloss.NewStyle().Foreground(th.Dim).Render("executing...")
 	} else {
 		r := *result
-		if len(r) > 500 {
-			r = r[:500] + "\n... (truncated)"
+		if len(r) > 600 {
+			r = r[:600] + "\n... (truncated)"
 		}
-		// Wrap tool output in a code fence so glamour preserves
-		// newlines and applies syntax highlighting as preformatted text.
-		content = m.renderMarkdown("```\n" + r + "\n```")
+		// Use language tag for syntax highlighting when known.
+		fence := "```" + lang + "\n" + r + "\n```"
+		content = m.renderMarkdown(fence)
 	}
 
 	return label + "\n" + style.Render(content)
+}
+
+// renderSubAgentPanel renders a header card when a sub-agent is spawned.
+func (m *Model) renderSubAgentPanel(id, task, model string) string {
+	th := m.theme
+
+	// Truncate long task descriptions for display
+	taskDisplay := task
+	if len(taskDisplay) > 120 {
+		taskDisplay = taskDisplay[:117] + "..."
+	}
+
+	style := lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(th.Secondary).
+		Padding(0, 1).
+		Width(m.width - 4)
+
+	label := lipgloss.NewStyle().Foreground(th.Secondary).Bold(true).
+		Render(fmt.Sprintf("  Sub-agent [%s] — %s", id, model))
+
+	body := lipgloss.NewStyle().Foreground(th.Dim).
+		Render(taskDisplay)
+
+	return label + "\n" + style.Render(body)
 }
 
 func (m *Model) renderErrorPanel(text string) string {
@@ -159,11 +184,22 @@ func (m *Model) renderStatusBar() string {
 		scrollInfo = lipgloss.NewStyle().Foreground(th.Accent).Render(fmt.Sprintf(" [+%d] ", m.scrollOffset))
 	}
 
-	tokenInfo := fmt.Sprintf("tokens: %d/%d", m.inputTokens, m.outputTokens)
-	if m.cacheRead > 0 || m.cacheCreated > 0 {
-		tokenInfo += fmt.Sprintf(" cache: %d/%d", m.cacheRead, m.cacheCreated)
+	// Context window gauge (200k token limit)
+	const ctxMax = 200000
+	ctxPct := 0
+	if m.ctxTokensUsed > 0 {
+		ctxPct = m.ctxTokensUsed * 100 / ctxMax
+		if ctxPct > 100 {
+			ctxPct = 100
+		}
 	}
-	right := tokenStyle.Render(tokenInfo)
+	ctxGauge := renderGauge(ctxPct, 8, m.theme)
+
+	tokenInfo := fmt.Sprintf("in:%d out:%d", m.inputTokens, m.outputTokens)
+	if m.cacheRead > 0 || m.cacheCreated > 0 {
+		tokenInfo += fmt.Sprintf(" $:%d", m.cacheRead)
+	}
+	right := tokenStyle.Render(ctxGauge + " ctx:" + fmt.Sprintf("%d%%", ctxPct) + " " + tokenInfo)
 
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(middle) - lipgloss.Width(scrollInfo) - lipgloss.Width(right) - 2
 	if gap < 1 {
@@ -182,4 +218,21 @@ func (m *Model) renderSpinner() string {
 	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 	frame := frames[m.spinnerIdx%len(frames)]
 	return lipgloss.NewStyle().Foreground(m.theme.Primary).Render(frame)
+}
+
+// renderGauge renders a mini ASCII bar showing pct% filled out of width chars.
+func renderGauge(pct, width int, th Theme) string {
+	filled := pct * width / 100
+	if filled > width {
+		filled = width
+	}
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+	color := th.Primary
+	if pct >= 80 {
+		color = th.Accent
+	}
+	if pct >= 95 {
+		color = th.Error
+	}
+	return lipgloss.NewStyle().Foreground(color).Render("[" + bar + "]")
 }

@@ -82,5 +82,11 @@ func (t *BashTool) Execute(ctx context.Context, input json.RawMessage) ToolResul
 	if output == "" {
 		output = "(no output)"
 	}
-	return ToolResult{Output: output}
+
+	lang := DetectLangFromCommand(params.Command)
+	if lang == "" {
+		lang = DetectLangFromContent(output)
+	}
+
+	return ToolResult{Output: output, Lang: lang}
 }

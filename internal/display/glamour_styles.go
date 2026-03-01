@@ -16,7 +16,7 @@ var styleFiles map[string][]byte
 
 func init() {
 	styleFiles = make(map[string][]byte)
-	for _, name := range []string{"cyber", "ocean", "ember", "mono"} {
+	for _, name := range ThemeNames() {
 		data, err := styleFS.ReadFile("styles/" + name + ".json")
 		if err != nil {
 			panic("missing embedded style: " + name + ": " + err.Error())
