@@ -159,29 +159,30 @@ func (a *Agent) Run(ctx context.Context, userInput string) error {
 }
 
 // buildRequest constructs an API request with prompt caching markers.
-// Cache control is applied to: system prompt, last tool, and the second-to-last
-// user message to maximize cache hits across turns.
+// The Anthropic API allows at most 4 cache_control breakpoints per request.
+// We use them as: (1) system prompt, (2) last tool definition,
+// (3) the penultimate user message — giving 3 breakpoints total,
+// which leaves headroom and maximizes cache reuse across turns.
 func (a *Agent) buildRequest() *api.Request {
 	ephemeral := &api.CacheControl{Type: "ephemeral"}
 
-	// System prompt as a cacheable block
+	// Breakpoint 1: system prompt
 	system := []api.SystemBlock{{
 		Type:         "text",
 		Text:         a.config.SystemPrompt,
 		CacheControl: ephemeral,
 	}}
 
-	// Tools with cache_control on the last one
+	// Breakpoint 2: last tool definition
 	tools := a.registry.APIDefs()
 	if len(tools) > 0 {
 		tools[len(tools)-1].CacheControl = ephemeral
 	}
 
-	// Deep copy messages and apply cache_control to the second-to-last user turn.
-	// This ensures all prior conversation context is cached between turns.
-	messages := make([]api.Message, len(a.conversation.Messages))
-	copy(messages, a.conversation.Messages)
-	applyCacheToMessages(messages)
+	// Build a clean copy of messages with exactly one cache breakpoint.
+	// We strip any stale cache_control from all messages, then mark
+	// the penultimate user message (breakpoint 3).
+	messages := copyMessagesWithCache(a.conversation.Messages)
 
 	return &api.Request{
 		Model:       a.config.Model,
@@ -193,37 +194,54 @@ func (a *Agent) buildRequest() *api.Request {
 	}
 }
 
-// applyCacheToMessages adds cache_control to the last content block of the
-// second-to-last user message, marking the conversation prefix as cacheable.
-func applyCacheToMessages(messages []api.Message) {
-	// Find the second-to-last user message
+// copyMessagesWithCache returns a deep copy of messages with all existing
+// cache_control markers stripped, then adds one breakpoint on the last
+// content block of the second-to-last user message.
+func copyMessagesWithCache(orig []api.Message) []api.Message {
+	messages := make([]api.Message, len(orig))
+
+	// Deep copy each message, stripping any cache_control
+	for i, msg := range orig {
+		messages[i] = api.Message{Role: msg.Role}
+		switch content := msg.Content.(type) {
+		case string:
+			messages[i].Content = content
+		case []api.ContentBlock:
+			blocks := make([]api.ContentBlock, len(content))
+			for j, b := range content {
+				blocks[j] = b
+				blocks[j].CacheControl = nil // strip stale markers
+			}
+			messages[i].Content = blocks
+		default:
+			messages[i].Content = msg.Content
+		}
+	}
+
+	// Find the second-to-last user message and mark its last block
 	userCount := 0
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role == "user" {
 			userCount++
 			if userCount == 2 {
 				markLastBlock(&messages[i])
-				return
+				return messages
 			}
 		}
 	}
+
+	return messages
 }
 
 // markLastBlock adds cache_control to the last content block of a message.
-// It creates a copy to avoid mutating the original conversation data.
 func markLastBlock(msg *api.Message) {
 	ephemeral := &api.CacheControl{Type: "ephemeral"}
 	switch content := msg.Content.(type) {
 	case []api.ContentBlock:
 		if len(content) > 0 {
-			// Deep copy the blocks so we don't mutate conversation history
-			blocks := make([]api.ContentBlock, len(content))
-			copy(blocks, content)
-			blocks[len(blocks)-1].CacheControl = ephemeral
-			msg.Content = blocks
+			content[len(content)-1].CacheControl = ephemeral
 		}
 	case string:
-		// Convert string content to block form so we can add cache_control
 		msg.Content = []api.ContentBlock{{
 			Type:         "text",
 			Text:         content,
