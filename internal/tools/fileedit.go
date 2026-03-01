@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -35,7 +36,7 @@ func (t *FileEditTool) InputSchema() json.RawMessage {
 			},
 			"path": {
 				"type": "string",
-				"description": "Absolute path to the file"
+				"description": "Path to the file (absolute or relative to cwd)"
 			},
 			"old_string": {
 				"type": "string",
@@ -66,13 +67,20 @@ func (t *FileEditTool) Execute(ctx context.Context, input json.RawMessage) ToolR
 		return ToolResult{Error: fmt.Sprintf("invalid input: %v", err), IsError: true}
 	}
 
+	path := params.Path
+	if !filepath.IsAbs(path) {
+		if abs, err := filepath.Abs(path); err == nil {
+			path = abs
+		}
+	}
+
 	switch params.Command {
 	case "str_replace":
-		return t.strReplace(params.Path, params.OldString, params.NewString)
+		return t.strReplace(path, params.OldString, params.NewString)
 	case "insert":
-		return t.insert(params.Path, params.InsertLine, params.NewString)
+		return t.insert(path, params.InsertLine, params.NewString)
 	case "undo_edit":
-		return t.undoEdit(params.Path)
+		return t.undoEdit(path)
 	default:
 		return ToolResult{Error: fmt.Sprintf("unknown command: %s", params.Command), IsError: true}
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -24,7 +25,7 @@ func (t *FileReadTool) InputSchema() json.RawMessage {
 		"properties": {
 			"path": {
 				"type": "string",
-				"description": "Absolute path to the file to read"
+				"description": "Path to the file to read (absolute or relative to cwd)"
 			},
 			"offset": {
 				"type": "integer",
@@ -49,7 +50,14 @@ func (t *FileReadTool) Execute(ctx context.Context, input json.RawMessage) ToolR
 		return ToolResult{Error: fmt.Sprintf("invalid input: %v", err), IsError: true}
 	}
 
-	data, err := os.ReadFile(params.Path)
+	path := params.Path
+	if !filepath.IsAbs(path) {
+		if abs, err := filepath.Abs(path); err == nil {
+			path = abs
+		}
+	}
+
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return ToolResult{Error: fmt.Sprintf("read error: %v", err), IsError: true}
 	}

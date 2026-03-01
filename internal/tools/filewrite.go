@@ -24,7 +24,7 @@ func (t *FileWriteTool) InputSchema() json.RawMessage {
 		"properties": {
 			"path": {
 				"type": "string",
-				"description": "Absolute path to the file to write"
+				"description": "Path to the file to write (absolute or relative to cwd)"
 			},
 			"content": {
 				"type": "string",
@@ -44,18 +44,23 @@ func (t *FileWriteTool) Execute(ctx context.Context, input json.RawMessage) Tool
 		return ToolResult{Error: fmt.Sprintf("invalid input: %v", err), IsError: true}
 	}
 
-	if !filepath.IsAbs(params.Path) {
-		return ToolResult{Error: "path must be absolute", IsError: true}
+	path := params.Path
+	if !filepath.IsAbs(path) {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return ToolResult{Error: fmt.Sprintf("resolve path: %v", err), IsError: true}
+		}
+		path = abs
 	}
 
-	dir := filepath.Dir(params.Path)
+	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return ToolResult{Error: fmt.Sprintf("create directory: %v", err), IsError: true}
 	}
 
-	if err := os.WriteFile(params.Path, []byte(params.Content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(params.Content), 0644); err != nil {
 		return ToolResult{Error: fmt.Sprintf("write error: %v", err), IsError: true}
 	}
 
-	return ToolResult{Output: fmt.Sprintf("Wrote %d bytes to %s", len(params.Content), params.Path)}
+	return ToolResult{Output: fmt.Sprintf("Wrote %d bytes to %s", len(params.Content), path)}
 }

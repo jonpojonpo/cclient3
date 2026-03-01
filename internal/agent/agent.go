@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -166,10 +167,15 @@ func (a *Agent) Run(ctx context.Context, userInput string) error {
 func (a *Agent) buildRequest() *api.Request {
 	ephemeral := &api.CacheControl{Type: "ephemeral"}
 
-	// Breakpoint 1: system prompt
+	// Breakpoint 1: system prompt (with cwd context)
+	cwd, _ := os.Getwd()
+	systemText := a.config.SystemPrompt
+	if cwd != "" {
+		systemText += fmt.Sprintf("\n\nCurrent working directory: %s", cwd)
+	}
 	system := []api.SystemBlock{{
 		Type:         "text",
-		Text:         a.config.SystemPrompt,
+		Text:         systemText,
 		CacheControl: ephemeral,
 	}}
 
