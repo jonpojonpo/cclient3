@@ -166,4 +166,75 @@ func RegisterBuiltins(reg *Registry, ag *agent.Agent, msgChan chan tea.Msg) {
 			return nil
 		},
 	})
+
+	reg.Register(Command{
+		Name:        "/skills",
+		Description: "List available skills and their active state",
+		Handler: func(args string) error {
+			mgr := ag.Skills()
+			available := mgr.Available()
+			if len(available) == 0 {
+				msgChan <- display.StatusMsg{Text: "No skills found. Add .md files to .skills/ in your project directory."}
+				return nil
+			}
+			var b strings.Builder
+			b.WriteString("Available skills (use /skill <name> to toggle):\n")
+			for _, s := range available {
+				marker := "  "
+				if mgr.IsActive(s.Name) {
+					marker = "✓ "
+				}
+				desc := s.Description
+				if desc == "" {
+					desc = "(no description)"
+				}
+				b.WriteString(fmt.Sprintf("%s%-20s %s\n", marker, s.Name, desc))
+			}
+			msgChan <- display.StatusMsg{Text: b.String()}
+			return nil
+		},
+	})
+
+	reg.Register(Command{
+		Name:        "/skill",
+		Description: "Toggle a skill on/off (/skill <name>). No args lists skills.",
+		Handler: func(args string) error {
+			name := strings.TrimSpace(args)
+			mgr := ag.Skills()
+			if name == "" {
+				// Redirect to /skills listing
+				available := mgr.Available()
+				if len(available) == 0 {
+					msgChan <- display.StatusMsg{Text: "No skills found. Add .md files to .skills/ in your project directory."}
+					return nil
+				}
+				var b strings.Builder
+				b.WriteString("Available skills (use /skill <name> to toggle):\n")
+				for _, s := range available {
+					marker := "  "
+					if mgr.IsActive(s.Name) {
+						marker = "✓ "
+					}
+					desc := s.Description
+					if desc == "" {
+						desc = "(no description)"
+					}
+					b.WriteString(fmt.Sprintf("%s%-20s %s\n", marker, s.Name, desc))
+				}
+				msgChan <- display.StatusMsg{Text: b.String()}
+				return nil
+			}
+			active, found := mgr.Toggle(name)
+			if !found {
+				msgChan <- display.ErrorMsg{Err: fmt.Errorf("skill %q not found (use /skills to list)", name)}
+				return nil
+			}
+			state := "deactivated"
+			if active {
+				state = "activated"
+			}
+			msgChan <- display.StatusMsg{Text: fmt.Sprintf("Skill %q %s", name, state)}
+			return nil
+		},
+	})
 }

@@ -54,8 +54,48 @@ var Themes = map[string]Theme{
 		BG:        lipgloss.Color("#000000"),
 		Text:      lipgloss.Color("#AAAAAA"),
 	},
+	"nord": {
+		Name:      "nord",
+		Primary:   lipgloss.Color("#88C0D0"),
+		Secondary: lipgloss.Color("#81A1C1"),
+		Accent:    lipgloss.Color("#EBCB8B"),
+		Dim:       lipgloss.Color("#616E88"),
+		Error:     lipgloss.Color("#BF616A"),
+		BG:        lipgloss.Color("#2E3440"),
+		Text:      lipgloss.Color("#D8DEE9"),
+	},
+	"gruvbox": {
+		Name:      "gruvbox",
+		Primary:   lipgloss.Color("#FABD2F"),
+		Secondary: lipgloss.Color("#83A598"),
+		Accent:    lipgloss.Color("#FE8019"),
+		Dim:       lipgloss.Color("#928374"),
+		Error:     lipgloss.Color("#FB4934"),
+		BG:        lipgloss.Color("#282828"),
+		Text:      lipgloss.Color("#EBDBB2"),
+	},
+	"forest": {
+		Name:      "forest",
+		Primary:   lipgloss.Color("#52B788"),
+		Secondary: lipgloss.Color("#74C69D"),
+		Accent:    lipgloss.Color("#D4AC0D"),
+		Dim:       lipgloss.Color("#40916C"),
+		Error:     lipgloss.Color("#BC4749"),
+		BG:        lipgloss.Color("#1B2D23"),
+		Text:      lipgloss.Color("#D4E6C3"),
+	},
+	"rose": {
+		Name:      "rose",
+		Primary:   lipgloss.Color("#FF85A1"),
+		Secondary: lipgloss.Color("#E8A0BF"),
+		Accent:    lipgloss.Color("#FFCBA4"),
+		Dim:       lipgloss.Color("#C9A0DC"),
+		Error:     lipgloss.Color("#FF4757"),
+		BG:        lipgloss.Color("#2D1B2E"),
+		Text:      lipgloss.Color("#F5E6E8"),
+	},
 }
 
 func ThemeNames() []string {
-	return []string{"cyber", "ocean", "ember", "mono"}
+	return []string{"cyber", "ocean", "ember", "mono", "nord", "gruvbox", "forest", "rose"}
 }

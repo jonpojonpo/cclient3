@@ -92,12 +92,22 @@ func DefaultBashSafetyHook() PreToolUseHook {
 		"rm -rf ~",
 	}
 
-	// Regex patterns for more complex evasions
+	// Regex patterns for more complex evasions — auto-blocked
 	dangerousPatterns := []*regexp.Regexp{
-		// Pipe from network to shell
 		regexp.MustCompile(`(curl|wget)\s+.*\|\s*(ba)?sh`),
-		// Recursive force-remove on root-like paths
 		regexp.MustCompile(`rm\s+(-[a-z]*r[a-z]*\s+(-[a-z]+\s+)*|(-[a-z]+\s+)*-[a-z]*r[a-z]*\s+)/`),
+	}
+
+	// Moderate-risk commands: ask the user instead of auto-blocking.
+	moderatePatterns := []*regexp.Regexp{
+		regexp.MustCompile(`git\s+push\s+.*--force`),
+		regexp.MustCompile(`git\s+reset\s+--hard`),
+		regexp.MustCompile(`git\s+clean\s+-[a-z]*f`),
+		regexp.MustCompile(`chmod\s+-[rR]`),
+		regexp.MustCompile(`rm\s+-[a-z]*r`), // rm -r (non-root) — ask
+		regexp.MustCompile(`truncate\s+`),
+		regexp.MustCompile(`systemctl\s+(stop|restart|disable)`),
+		regexp.MustCompile(`service\s+\w+\s+(stop|restart)`),
 	}
 
 	return func(call tools.ToolCall) string {
@@ -109,6 +119,7 @@ func DefaultBashSafetyHook() PreToolUseHook {
 		}
 		cmd := normalizeCommand(params.Command)
 
+		// Auto-block truly dangerous commands
 		for _, d := range dangerous {
 			if strings.Contains(cmd, d) {
 				return fmt.Sprintf("BLOCKED: dangerous command detected (%s)", d)
@@ -119,6 +130,14 @@ func DefaultBashSafetyHook() PreToolUseHook {
 				return fmt.Sprintf("BLOCKED: dangerous command pattern detected (%s)", p.String())
 			}
 		}
+
+		// Ask user for moderate-risk commands (prefixed with CONFIRM:)
+		for _, p := range moderatePatterns {
+			if p.MatchString(cmd) {
+				return fmt.Sprintf("CONFIRM:Allow execution of: %s", params.Command)
+			}
+		}
+
 		return ""
 	}
 }

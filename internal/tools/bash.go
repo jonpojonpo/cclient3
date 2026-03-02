@@ -154,7 +154,13 @@ func (t *BashTool) runFresh(ctx context.Context, command string, timeoutSecs int
 	if output == "" {
 		output = "(no output)"
 	}
-	return ToolResult{Output: output}
+
+	lang := DetectLangFromCommand(command)
+	if lang == "" {
+		lang = DetectLangFromContent(output)
+	}
+
+	return ToolResult{Output: output, Lang: lang}
 }
 
 // runInSession executes in a persistent named session.

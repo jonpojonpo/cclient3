@@ -83,5 +83,5 @@ func (t *FileReadTool) Execute(ctx context.Context, input json.RawMessage) ToolR
 		fmt.Fprintf(&b, "%6d\t%s\n", i+1, lines[i])
 	}
 
-	return ToolResult{Output: b.String()}
+	return ToolResult{Output: b.String(), Lang: DetectLangFromPath(params.Path)}
 }
