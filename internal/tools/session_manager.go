@@ -306,6 +306,17 @@ func (sm *SessionManager) ReadHistory(name string, lines int) ([]string, bool) {
 	return s.recentHistory(lines), true
 }
 
+// Prewarm pre-spawns the named sessions in the background so they are ready
+// to use immediately on first call (no cold-start bash launch latency).
+func (sm *SessionManager) Prewarm(names ...string) {
+	for _, name := range names {
+		name := name
+		go func() {
+			_, _ = sm.acquire(name)
+		}()
+	}
+}
+
 // KillAll terminates every active session. Called on agent shutdown.
 func (sm *SessionManager) KillAll() {
 	sm.mu.Lock()

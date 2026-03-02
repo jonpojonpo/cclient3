@@ -30,6 +30,7 @@ func NewAgent(cfg *config.Config, msgChan chan tea.Msg) *Agent {
 	client := api.NewClient(cfg.APIKey, cfg.APIEndpoint)
 	registry := tools.NewRegistry()
 	sessions := tools.NewSessionManager()
+	sessions.Prewarm("default", "scratch")
 
 	// Register all tools
 	registry.Register(tools.NewBashTool(cfg.BashTimeout, sessions))
