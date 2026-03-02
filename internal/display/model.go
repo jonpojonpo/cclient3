@@ -108,6 +108,9 @@ func (m *Model) tickSpinner() tea.Cmd {
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
+	// Agent messages all need to re-schedule waitForAgentMsg after handling.
+	// We set this flag in each agent message case instead of repeating the call.
+	scheduleWait := false
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -155,24 +158,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.tickSpinner())
 
 	case TextDeltaMsg:
+		scheduleWait = true
 		m.state = stateStreaming
 		m.currentText.WriteString(msg.Text)
-		cmds = append(cmds, m.waitForAgentMsg())
 
 	case ThinkingDeltaMsg:
+		scheduleWait = true
 		m.state = stateThinking
 		m.currentThinking.WriteString(msg.Thinking)
-		cmds = append(cmds, m.waitForAgentMsg())
 
 	case ToolStartMsg:
+		scheduleWait = true
 		m.state = stateToolExecuting
 		m.history = append(m.history, historyEntry{
 			content: m.renderToolPanel(msg.Name, msg.ID, nil, false),
 		})
 		m.scrollToBottom()
-		cmds = append(cmds, m.waitForAgentMsg())
 
 	case ToolResultMsg:
+		scheduleWait = true
 		r := msg.Result
 		output := r.Result.Output
 		if r.Result.Error != "" {
@@ -182,9 +186,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			content: m.renderToolPanel(r.Call.Name, r.Call.ID, &output, r.Result.IsError),
 		})
 		m.scrollToBottom()
-		cmds = append(cmds, m.waitForAgentMsg())
 
 	case StreamDoneMsg:
+		scheduleWait = true
 		// Flush current text to history
 		if m.currentThinking.Len() > 0 {
 			m.history = append(m.history, historyEntry{
@@ -200,43 +204,43 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.state = stateIdle
 		m.scrollToBottom()
-		cmds = append(cmds, m.waitForAgentMsg())
 
 	case ErrorMsg:
+		scheduleWait = true
 		m.history = append(m.history, historyEntry{
 			content: m.renderErrorPanel(msg.Err.Error()),
 		})
 		m.state = stateIdle
 		m.scrollToBottom()
-		cmds = append(cmds, m.waitForAgentMsg())
 
 	case TokenUpdateMsg:
+		scheduleWait = true
 		m.inputTokens = msg.InputTokens
 		m.outputTokens = msg.OutputTokens
 		m.cacheCreated = msg.CacheCreationInputTokens
 		m.cacheRead = msg.CacheReadInputTokens
-		cmds = append(cmds, m.waitForAgentMsg())
 
 	case SetThemeMsg:
+		scheduleWait = true
 		if t, ok := Themes[msg.Name]; ok {
 			m.theme = t
 			m.bannerText = "" // invalidate banner cache
 		}
-		cmds = append(cmds, m.waitForAgentMsg())
 
 	case SetModelMsg:
+		scheduleWait = true
 		m.model = msg.Name
 		m.bannerText = "" // invalidate banner cache
-		cmds = append(cmds, m.waitForAgentMsg())
 
 	case StatusMsg:
+		scheduleWait = true
 		m.history = append(m.history, historyEntry{
 			content: lipgloss.NewStyle().Foreground(m.theme.Dim).Render(msg.Text),
 		})
 		m.scrollToBottom()
-		cmds = append(cmds, m.waitForAgentMsg())
 
 	case ModelsListMsg:
+		scheduleWait = true
 		var b strings.Builder
 		b.WriteString("Available models:\n")
 		for _, name := range msg.Models {
@@ -246,16 +250,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			content: lipgloss.NewStyle().Foreground(m.theme.Secondary).Render(b.String()),
 		})
 		m.scrollToBottom()
-		cmds = append(cmds, m.waitForAgentMsg())
 
 	case ClearMsg:
+		scheduleWait = true
 		m.history = nil
 		m.scrollOffset = 0
-		cmds = append(cmds, m.waitForAgentMsg())
 
 	case QuitMsg:
 		m.quitting = true
 		return m, tea.Quit
+	}
+
+	if scheduleWait {
+		cmds = append(cmds, m.waitForAgentMsg())
 	}
 
 	// Update text input
@@ -311,18 +318,19 @@ func (m *Model) View() string {
 	available := m.height - statusBarHeight - inputHeight - 1
 	bodyLines := strings.Split(body, "\n")
 
-	// Clamp scrollOffset to valid range
+	// Compute effective scroll offset (read-only, no mutation in View)
+	scrollOffset := m.scrollOffset
 	maxOffset := len(bodyLines) - available
 	if maxOffset < 0 {
 		maxOffset = 0
 	}
-	if m.scrollOffset > maxOffset {
-		m.scrollOffset = maxOffset
+	if scrollOffset > maxOffset {
+		scrollOffset = maxOffset
 	}
 
 	if len(bodyLines) > available && available > 0 {
 		// Show a window: lines from [end-available-scrollOffset, end-scrollOffset]
-		end := len(bodyLines) - m.scrollOffset
+		end := len(bodyLines) - scrollOffset
 		start := end - available
 		if start < 0 {
 			start = 0

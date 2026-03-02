@@ -24,30 +24,32 @@ func RegisterBuiltins(reg *Registry, ag *agent.Agent, msgChan chan tea.Msg) {
 	// Track cached models for cycling
 	var cachedModels []string
 
+	ensureModels := func() bool {
+		if len(cachedModels) > 0 {
+			return true
+		}
+		models, err := ag.ListModels(context.Background())
+		if err != nil {
+			msgChan <- display.ErrorMsg{Err: fmt.Errorf("failed to list models: %w", err)}
+			return false
+		}
+		cachedModels = models
+		return true
+	}
+
 	modelHandler := func(args string) error {
 		args = strings.TrimSpace(args)
 		if args == "" || args == "list" {
-			// List models from API
-			ctx := context.Background()
-			models, err := ag.ListModels(ctx)
-			if err != nil {
-				msgChan <- display.ErrorMsg{Err: fmt.Errorf("failed to list models: %w", err)}
+			if !ensureModels() {
 				return nil
 			}
-			cachedModels = models
-			msgChan <- display.ModelsListMsg{Models: models}
+			msgChan <- display.ModelsListMsg{Models: cachedModels}
 			return nil
 		}
 		if args == "next" || args == "cycle" {
 			// Cycle to next model
-			if len(cachedModels) == 0 {
-				ctx := context.Background()
-				models, err := ag.ListModels(ctx)
-				if err != nil {
-					msgChan <- display.ErrorMsg{Err: fmt.Errorf("failed to list models: %w", err)}
-					return nil
-				}
-				cachedModels = models
+			if !ensureModels() {
+				return nil
 			}
 			if len(cachedModels) == 0 {
 				msgChan <- display.StatusMsg{Text: "No models available"}

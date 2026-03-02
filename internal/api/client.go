@@ -27,61 +27,49 @@ func NewClient(apiKey, endpoint string) *Client {
 	}
 }
 
+// doPost marshals req, POSTs to c.endpoint, and returns the open response body.
+// The caller is responsible for closing the body. On non-200 the body is closed
+// and an error is returned.
+func (c *Client) doPost(ctx context.Context, req *Request) (*http.Response, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	c.setHeaders(httpReq)
+	resp, err := c.http.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("do request: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
+		return nil, c.parseError(resp)
+	}
+	return resp, nil
+}
+
 // StreamMessage sends a streaming request and dispatches events via the callback.
 func (c *Client) StreamMessage(ctx context.Context, req *Request, cb StreamCallback) error {
 	req.Stream = true
-
-	body, err := json.Marshal(req)
+	resp, err := c.doPost(ctx, req)
 	if err != nil {
-		return fmt.Errorf("marshal request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.endpoint, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-
-	c.setHeaders(httpReq)
-
-	resp, err := c.http.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("do request: %w", err)
+		return err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return c.parseError(resp)
-	}
-
 	return ParseSSEStream(resp.Body, cb)
 }
 
 // SendMessage sends a non-streaming request and returns the full response.
 func (c *Client) SendMessage(ctx context.Context, req *Request) (*Response, error) {
 	req.Stream = false
-
-	body, err := json.Marshal(req)
+	resp, err := c.doPost(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.endpoint, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-
-	c.setHeaders(httpReq)
-
-	resp, err := c.http.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("do request: %w", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, c.parseError(resp)
-	}
-
 	var result Response
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
@@ -201,17 +189,3 @@ func (c *Client) parseError(resp *http.Response) error {
 	return &apiErr
 }
 
-// ModelInfo represents a model from the /models endpoint.
-type ModelInfo struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"display_name"`
-	CreatedAt   string `json:"created_at"`
-	Type        string `json:"type"`
-}
-
-type ModelsResponse struct {
-	Data    []ModelInfo `json:"data"`
-	HasMore bool        `json:"has_more"`
-	FirstID string      `json:"first_id"`
-	LastID  string      `json:"last_id"`
-}

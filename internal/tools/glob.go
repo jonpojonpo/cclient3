@@ -58,7 +58,9 @@ func (t *GlobTool) Execute(ctx context.Context, input json.RawMessage) ToolResul
 	var matches []string
 
 	if strings.Contains(params.Pattern, "**") {
-		// Walk for recursive glob
+		// Walk for recursive glob; Go's filepath.Match doesn't support **,
+		// so match only the file extension/name component.
+		basePat := filepath.Base(params.Pattern)
 		err := filepath.Walk(base, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return nil // skip errors
@@ -66,14 +68,7 @@ func (t *GlobTool) Execute(ctx context.Context, input json.RawMessage) ToolResul
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			rel, _ := filepath.Rel(base, path)
-			matched, _ := filepath.Match(flattenPattern(params.Pattern), rel)
-			if matched {
-				matches = append(matches, path)
-			}
-			// Also try matching with just the filename for patterns like **/*.go
-			if !matched && !info.IsDir() {
-				basePat := filepath.Base(params.Pattern)
+			if !info.IsDir() {
 				if m, _ := filepath.Match(basePat, info.Name()); m {
 					matches = append(matches, path)
 				}
@@ -92,26 +87,11 @@ func (t *GlobTool) Execute(ctx context.Context, input json.RawMessage) ToolResul
 		}
 	}
 
-	// Deduplicate
-	seen := make(map[string]bool)
-	var unique []string
-	for _, m := range matches {
-		if !seen[m] {
-			seen[m] = true
-			unique = append(unique, m)
-		}
-	}
+	sort.Strings(matches)
 
-	sort.Strings(unique)
-
-	if len(unique) == 0 {
+	if len(matches) == 0 {
 		return ToolResult{Output: "(no matches)"}
 	}
 
-	return ToolResult{Output: strings.Join(unique, "\n")}
-}
-
-// flattenPattern removes ** from patterns for simple matching.
-func flattenPattern(pattern string) string {
-	return strings.ReplaceAll(pattern, "**/", "")
+	return ToolResult{Output: strings.Join(matches, "\n")}
 }

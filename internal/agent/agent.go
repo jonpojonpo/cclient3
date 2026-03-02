@@ -22,14 +22,18 @@ type Agent struct {
 	executor     *tools.Executor
 	hooks        *HookRegistry
 	msgChan      chan tea.Msg
+	cwd          string          // cached at construction; bash tools run in isolated subshells
+	sessions     *tools.SessionManager
 }
 
 func NewAgent(cfg *config.Config, msgChan chan tea.Msg) *Agent {
 	client := api.NewClient(cfg.APIKey, cfg.APIEndpoint)
 	registry := tools.NewRegistry()
+	sessions := tools.NewSessionManager()
+	sessions.Prewarm("default", "scratch")
 
 	// Register all tools
-	registry.Register(tools.NewBashTool(cfg.BashTimeout))
+	registry.Register(tools.NewBashTool(cfg.BashTimeout, sessions))
 	registry.Register(tools.NewFileReadTool())
 	registry.Register(tools.NewFileWriteTool())
 	registry.Register(tools.NewFileEditTool())
@@ -40,6 +44,8 @@ func NewAgent(cfg *config.Config, msgChan chan tea.Msg) *Agent {
 	hooks := NewHookRegistry()
 	hooks.RegisterPreToolUse("bash", DefaultBashSafetyHook())
 
+	cwd, _ := os.Getwd()
+
 	return &Agent{
 		client:       client,
 		config:       cfg,
@@ -48,7 +54,14 @@ func NewAgent(cfg *config.Config, msgChan chan tea.Msg) *Agent {
 		executor:     tools.NewExecutor(registry, cfg.MaxToolConcurrency),
 		hooks:        hooks,
 		msgChan:      msgChan,
+		cwd:          cwd,
+		sessions:     sessions,
 	}
+}
+
+// Shutdown cleans up agent resources (e.g. terminates bash sessions).
+func (a *Agent) Shutdown() {
+	a.sessions.KillAll()
 }
 
 func (a *Agent) Client() *api.Client {
@@ -140,20 +153,7 @@ func (a *Agent) Run(ctx context.Context, userInput string) error {
 
 		// Build tool_result blocks for the API
 		allResults := append(denied, results...)
-		var toolResultBlocks []api.ContentBlock
-		for _, r := range allResults {
-			content := r.Result.Output
-			if r.Result.Error != "" {
-				content = r.Result.Error
-			}
-			toolResultBlocks = append(toolResultBlocks, api.ContentBlock{
-				Type:      "tool_result",
-				ToolUseID: r.Call.ID,
-				Content:   content,
-				IsError:   r.Result.IsError,
-			})
-		}
-
+		toolResultBlocks := makeToolResultBlocks(allResults)
 		a.conversation.AddToolResults(toolResultBlocks)
 		// Loop back for next response
 	}
@@ -168,10 +168,9 @@ func (a *Agent) buildRequest() *api.Request {
 	ephemeral := &api.CacheControl{Type: "ephemeral"}
 
 	// Breakpoint 1: system prompt (with cwd context)
-	cwd, _ := os.Getwd()
 	systemText := a.config.SystemPrompt
-	if cwd != "" {
-		systemText += fmt.Sprintf("\n\nCurrent working directory: %s", cwd)
+	if a.cwd != "" {
+		systemText += fmt.Sprintf("\n\nCurrent working directory: %s", a.cwd)
 	}
 	system := []api.SystemBlock{{
 		Type:         "text",
@@ -454,26 +453,42 @@ func (a *Agent) RunSingleTurn(ctx context.Context, prompt string) (string, error
 			return text, nil
 		}
 
-		// Execute tools
-		results := a.executor.ExecuteAll(ctx, toolCalls)
-
-		var toolResultBlocks []api.ContentBlock
-		for _, r := range results {
-			content := r.Result.Output
-			if r.Result.Error != "" {
-				content = r.Result.Error
+		// Run hooks before executing tools (same safety checks as Run)
+		var approved []tools.ToolCall
+		var denied []tools.ToolCallResult
+		for _, tc := range toolCalls {
+			if reason := a.hooks.CheckPreToolUse(tc); reason != "" {
+				denied = append(denied, tools.ToolCallResult{
+					Call:   tc,
+					Result: tools.ToolResult{Error: reason, IsError: true},
+				})
+			} else {
+				approved = append(approved, tc)
 			}
-			toolResultBlocks = append(toolResultBlocks, api.ContentBlock{
-				Type:      "tool_result",
-				ToolUseID: r.Call.ID,
-				Content:   content,
-				IsError:   r.Result.IsError,
-			})
 		}
 
-		a.conversation.AddToolResults(toolResultBlocks)
+		results := a.executor.ExecuteAll(ctx, approved)
+		a.conversation.AddToolResults(makeToolResultBlocks(append(denied, results...)))
 		// Loop back for next response
 	}
+}
+
+// makeToolResultBlocks converts tool call results into API content blocks.
+func makeToolResultBlocks(results []tools.ToolCallResult) []api.ContentBlock {
+	blocks := make([]api.ContentBlock, len(results))
+	for i, r := range results {
+		content := r.Result.Output
+		if r.Result.Error != "" {
+			content = r.Result.Error
+		}
+		blocks[i] = api.ContentBlock{
+			Type:      "tool_result",
+			ToolUseID: r.Call.ID,
+			Content:   content,
+			IsError:   r.Result.IsError,
+		}
+	}
+	return blocks
 }
 
 // SetModel changes the active model.
