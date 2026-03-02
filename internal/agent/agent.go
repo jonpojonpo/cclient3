@@ -22,15 +22,17 @@ type Agent struct {
 	executor     *tools.Executor
 	hooks        *HookRegistry
 	msgChan      chan tea.Msg
-	cwd          string // cached at construction; bash tools run in isolated subshells
+	cwd          string          // cached at construction; bash tools run in isolated subshells
+	sessions     *tools.SessionManager
 }
 
 func NewAgent(cfg *config.Config, msgChan chan tea.Msg) *Agent {
 	client := api.NewClient(cfg.APIKey, cfg.APIEndpoint)
 	registry := tools.NewRegistry()
+	sessions := tools.NewSessionManager()
 
 	// Register all tools
-	registry.Register(tools.NewBashTool(cfg.BashTimeout))
+	registry.Register(tools.NewBashTool(cfg.BashTimeout, sessions))
 	registry.Register(tools.NewFileReadTool())
 	registry.Register(tools.NewFileWriteTool())
 	registry.Register(tools.NewFileEditTool())
@@ -52,7 +54,13 @@ func NewAgent(cfg *config.Config, msgChan chan tea.Msg) *Agent {
 		hooks:        hooks,
 		msgChan:      msgChan,
 		cwd:          cwd,
+		sessions:     sessions,
 	}
+}
+
+// Shutdown cleans up agent resources (e.g. terminates bash sessions).
+func (a *Agent) Shutdown() {
+	a.sessions.KillAll()
 }
 
 func (a *Agent) Client() *api.Client {

@@ -87,6 +87,7 @@ func main() {
 func runSingleTurn(ctx context.Context, cfg *config.Config, prompt string) {
 	msgChan := make(chan tea.Msg, 100)
 	ag := agent.NewAgent(cfg, msgChan)
+	defer ag.Shutdown()
 
 	text, err := ag.RunSingleTurn(ctx, prompt)
 	if err != nil {
@@ -140,6 +141,7 @@ func runInteractive(ctx context.Context, cfg *config.Config) {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+	ag.Shutdown()
 }
 
 // validateModel checks the configured model against the API and auto-corrects if possible.
