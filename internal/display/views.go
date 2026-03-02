@@ -9,43 +9,29 @@ import (
 
 // Panel renders for different content types.
 
-func (m *Model) renderUserPanel(text string) string {
-	th := m.theme
+// renderPanel is the shared skeleton for all bordered panels.
+func (m *Model) renderPanel(color lipgloss.Color, label, content string) string {
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(th.Accent).
+		BorderForeground(color).
 		Padding(0, 1).
 		Width(m.width - 4)
+	lbl := lipgloss.NewStyle().Foreground(color).Bold(true).Render(label)
+	return lbl + "\n" + style.Render(content)
+}
 
-	label := lipgloss.NewStyle().
-		Foreground(th.Accent).
-		Bold(true).
-		Render("  You")
-
-	return label + "\n" + style.Render(text)
+func (m *Model) renderUserPanel(text string) string {
+	return m.renderPanel(m.theme.Accent, "  You", text)
 }
 
 func (m *Model) renderAssistantPanel(text string) string {
-	th := m.theme
-	style := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(th.Primary).
-		Padding(0, 1).
-		Width(m.width - 4)
-
-	label := lipgloss.NewStyle().
-		Foreground(th.Primary).
-		Bold(true).
-		Render("  Assistant")
-
 	content := text
 	if content == "" {
 		content = " "
 	} else {
 		content = m.renderMarkdown(content)
 	}
-
-	return label + "\n" + style.Render(content)
+	return m.renderPanel(m.theme.Primary, "  Assistant", content)
 }
 
 // renderMarkdown renders markdown text using glamour with theme-matched styling.
@@ -68,23 +54,16 @@ func (m *Model) renderMarkdown(text string) string {
 }
 
 func (m *Model) renderThinkingPanel(text string) string {
+	if len(text) > 500 {
+		text = text[:500] + "..."
+	}
 	th := m.theme
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(th.Dim).
 		Padding(0, 1).
 		Width(m.width - 4)
-
-	label := lipgloss.NewStyle().
-		Foreground(th.Dim).
-		Italic(true).
-		Render("  Thinking...")
-
-	// Truncate long thinking
-	if len(text) > 500 {
-		text = text[:500] + "..."
-	}
-
+	label := lipgloss.NewStyle().Foreground(th.Dim).Italic(true).Render("  Thinking...")
 	return label + "\n" + style.Render(text)
 }
 
@@ -94,17 +73,6 @@ func (m *Model) renderToolPanel(name, id string, result *string, isError bool) s
 	if isError {
 		borderColor = th.Error
 	}
-
-	style := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(borderColor).
-		Padding(0, 1).
-		Width(m.width - 4)
-
-	label := lipgloss.NewStyle().
-		Foreground(th.Secondary).
-		Bold(true).
-		Render(fmt.Sprintf("  Tool: %s", name))
 
 	var content string
 	if result == nil {
@@ -119,23 +87,17 @@ func (m *Model) renderToolPanel(name, id string, result *string, isError bool) s
 		content = m.renderMarkdown("```\n" + r + "\n```")
 	}
 
+	label := lipgloss.NewStyle().Foreground(th.Secondary).Bold(true).Render(fmt.Sprintf("  Tool: %s", name))
+	style := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Padding(0, 1).
+		Width(m.width - 4)
 	return label + "\n" + style.Render(content)
 }
 
 func (m *Model) renderErrorPanel(text string) string {
-	th := m.theme
-	style := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(th.Error).
-		Padding(0, 1).
-		Width(m.width - 4)
-
-	label := lipgloss.NewStyle().
-		Foreground(th.Error).
-		Bold(true).
-		Render("  Error")
-
-	return label + "\n" + style.Render(text)
+	return m.renderPanel(m.theme.Error, "  Error", text)
 }
 
 func (m *Model) renderStatusBar() string {

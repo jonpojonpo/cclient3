@@ -12,9 +12,15 @@ import (
 	"strings"
 )
 
-type GrepTool struct{}
+type GrepTool struct {
+	rgPath string // empty if ripgrep is not available
+}
 
-func NewGrepTool() *GrepTool { return &GrepTool{} }
+func NewGrepTool() *GrepTool {
+	t := &GrepTool{}
+	t.rgPath, _ = exec.LookPath("rg")
+	return t
+}
 
 func (t *GrepTool) Name() string { return "grep" }
 
@@ -63,8 +69,8 @@ func (t *GrepTool) Execute(ctx context.Context, input json.RawMessage) ToolResul
 	}
 
 	// Try ripgrep first
-	if rgPath, err := exec.LookPath("rg"); err == nil {
-		return t.ripgrep(ctx, rgPath, params.Pattern, searchPath, params.Include)
+	if t.rgPath != "" {
+		return t.ripgrep(ctx, t.rgPath, params.Pattern, searchPath, params.Include)
 	}
 
 	// Fallback to built-in

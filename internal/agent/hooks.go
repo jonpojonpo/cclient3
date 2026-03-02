@@ -41,6 +41,11 @@ func (h *HookRegistry) CheckPreToolUse(call tools.ToolCall) string {
 	return ""
 }
 
+var (
+	reWhitespace   = regexp.MustCompile(`\s+`)
+	cmdPrefixes    = []string{"sudo ", "env ", "nohup ", "bash -c ", "sh -c "}
+)
+
 // normalizeCommand strips common evasion techniques from a command string.
 // Removes backslash-escaping within words, collapses whitespace, strips
 // leading sudo/env/nohup prefixes, and lowercases everything.
@@ -55,12 +60,12 @@ func normalizeCommand(cmd string) string {
 	cmd = strings.ReplaceAll(cmd, "\"", "")
 
 	// Collapse whitespace
-	cmd = regexp.MustCompile(`\s+`).ReplaceAllString(cmd, " ")
+	cmd = reWhitespace.ReplaceAllString(cmd, " ")
 
 	// Strip common command prefixes (sudo, env, nohup, etc.)
 	for {
 		trimmed := cmd
-		for _, prefix := range []string{"sudo ", "env ", "nohup ", "bash -c ", "sh -c "} {
+		for _, prefix := range cmdPrefixes {
 			trimmed = strings.TrimPrefix(trimmed, prefix)
 		}
 		if trimmed == cmd {

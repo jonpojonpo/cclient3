@@ -168,9 +168,10 @@ func (t *FileEditTool) pushHistory(path, content string) {
 
 func (t *FileEditTool) snippet(content, target string) string {
 	lines := strings.Split(content, "\n")
+	firstLine := strings.SplitN(target, "\n", 2)[0]
 	targetStart := -1
 	for i, l := range lines {
-		if strings.Contains(l, strings.Split(target, "\n")[0]) {
+		if strings.Contains(l, firstLine) {
 			targetStart = i
 			break
 		}

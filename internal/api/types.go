@@ -152,3 +152,20 @@ type MessageDelta struct {
 type MessageStopEvent struct {
 	Type string `json:"type"`
 }
+
+// --- Models endpoint types ---
+
+// ModelInfo represents a model from the /models endpoint.
+type ModelInfo struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name"`
+	CreatedAt   string `json:"created_at"`
+	Type        string `json:"type"`
+}
+
+type ModelsResponse struct {
+	Data    []ModelInfo `json:"data"`
+	HasMore bool        `json:"has_more"`
+	FirstID string      `json:"first_id"`
+	LastID  string      `json:"last_id"`
+}
