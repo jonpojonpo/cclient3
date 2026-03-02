@@ -159,6 +159,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Check for tab navigation keys (Alt+N, Alt+[, Alt+], Alt+w, Alt+p)
 		if m.handleTabKeys(msg) {
+			// Re-focus text input when switching to Chat tab
+			if m.tabs.ActiveIdx() == 0 {
+				m.textInput.Focus()
+			} else {
+				m.textInput.Blur()
+			}
 			return m, tea.Batch(cmds...)
 		}
 
@@ -687,18 +693,41 @@ func (m *Model) View() string {
 func (m *Model) handleTabKeys(msg tea.KeyMsg) bool {
 	key := msg.String()
 
-	// Alt+number for 1-9 (bubbletea sends these as strings like "alt+1")
-	if len(key) == 5 && key[:4] == "alt+" && key[4] >= '1' && key[4] <= '9' {
-		idx := int(key[4] - '1')
-		if idx >= 0 && idx < m.tabs.Count() {
-			m.tabs.SetActive(idx)
-			if idx == 0 {
-				m.tabs.ChatTab().UserPinned = false
+	// Alt+number: bubbletea v1 sends Alt+Rune as msg.Alt=true with runes.
+	// msg.String() returns "alt+1", "alt+2", etc.
+	// Also handle via msg.Alt + rune check for terminal compatibility.
+	if msg.Alt && msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
+		r := msg.Runes[0]
+		if r >= '1' && r <= '9' {
+			idx := int(r - '1')
+			if idx >= 0 && idx < m.tabs.Count() {
+				m.tabs.SetActive(idx)
+				if idx == 0 {
+					m.tabs.ChatTab().UserPinned = false
+				}
 			}
+			return true
 		}
-		return true
+		switch r {
+		case '[':
+			m.tabs.PrevTab()
+			return true
+		case ']':
+			m.tabs.NextTab()
+			return true
+		case 'w':
+			if m.tabs.ActiveIdx() != 0 {
+				m.tabs.Remove(m.activeTab().ID)
+			}
+			return true
+		case 'p':
+			active := m.activeTab()
+			active.UserPinned = !active.UserPinned
+			return true
+		}
 	}
 
+	// Fallback: match string representation for terminals that encode differently
 	switch key {
 	case "alt+[":
 		m.tabs.PrevTab()
@@ -707,15 +736,25 @@ func (m *Model) handleTabKeys(msg tea.KeyMsg) bool {
 		m.tabs.NextTab()
 		return true
 	case "alt+w":
-		// Close current non-Chat tab
 		if m.tabs.ActiveIdx() != 0 {
 			m.tabs.Remove(m.activeTab().ID)
 		}
 		return true
 	case "alt+p":
-		// Toggle pin on active tab
 		active := m.activeTab()
 		active.UserPinned = !active.UserPinned
+		return true
+	}
+
+	// Also check string-based alt+N pattern
+	if len(key) == 5 && key[:4] == "alt+" && key[4] >= '1' && key[4] <= '9' {
+		idx := int(key[4] - '1')
+		if idx >= 0 && idx < m.tabs.Count() {
+			m.tabs.SetActive(idx)
+			if idx == 0 {
+				m.tabs.ChatTab().UserPinned = false
+			}
+		}
 		return true
 	}
 
