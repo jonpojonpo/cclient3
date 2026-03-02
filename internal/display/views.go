@@ -142,8 +142,8 @@ func (m *Model) renderStatusBar() string {
 	middle := themeStyle.Render(fmt.Sprintf("[%s]", m.theme.Name))
 
 	scrollInfo := ""
-	if m.scrollOffset > 0 {
-		scrollInfo = lipgloss.NewStyle().Foreground(th.Accent).Render(fmt.Sprintf(" [+%d] ", m.scrollOffset))
+	if offset := m.activeTab().scrollOffset; offset > 0 {
+		scrollInfo = lipgloss.NewStyle().Foreground(th.Accent).Render(fmt.Sprintf(" [+%d] ", offset))
 	}
 
 	// Context window gauge (200k token limit)

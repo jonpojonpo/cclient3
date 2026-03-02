@@ -113,7 +113,7 @@ func runInteractive(ctx context.Context, cfg *config.Config) {
 
 	// Create command registry
 	cmdReg := commands.NewRegistry()
-	commands.RegisterBuiltins(cmdReg, ag, m.AgentMsgChan)
+	commands.RegisterBuiltins(cmdReg, ag, m.AgentMsgChan, m)
 
 	// Agent goroutine: reads from InputChan, processes messages
 	go func() {

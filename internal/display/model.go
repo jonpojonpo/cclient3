@@ -27,11 +27,11 @@ type historyEntry struct {
 }
 
 type Model struct {
-	// TUI state
-	state      displayState
+	// Tab management — per-tab state (history, scrollOffset, streaming) lives here
+	tabs *TabManager
+
+	// TUI global state
 	textInput  textinput.Model
-	history       []historyEntry
-	scrollOffset  int // lines scrolled up from bottom (0 = pinned to bottom)
 	width      int
 	height     int
 	spinnerIdx int
@@ -40,10 +40,6 @@ type Model struct {
 	inputHistory []string
 	historyIdx   int    // -1 = not navigating history
 	savedInput   string // saved draft when navigating history
-
-	// Current streaming state
-	currentText     strings.Builder
-	currentThinking strings.Builder
 
 	// Markdown rendering
 	mdRenderer *rendererCache
@@ -88,7 +84,7 @@ func NewModel(themeName, modelName string) *Model {
 	}
 
 	return &Model{
-		state:        stateIdle,
+		tabs:         NewTabManager(),
 		textInput:    ti,
 		mdRenderer:   newRendererCache(),
 		theme:        theme,
@@ -100,6 +96,11 @@ func NewModel(themeName, modelName string) *Model {
 		height:       24,
 		historyIdx:   -1,
 	}
+}
+
+// TabManager returns the tab manager for external callers (e.g. commands).
+func (m *Model) TabManager() *TabManager {
+	return m.tabs
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -123,8 +124,20 @@ func (m *Model) tickSpinner() tea.Cmd {
 	})
 }
 
+// chatTab is a convenience accessor for the always-present Chat tab.
+func (m *Model) chatTab() *Tab {
+	return m.tabs.ChatTab()
+}
+
+// activeTab returns the currently active tab.
+func (m *Model) activeTab() *Tab {
+	return m.tabs.Active()
+}
+
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
+	chat := m.chatTab()
+
 	// Agent messages all need to re-schedule waitForAgentMsg after handling.
 	// We set this flag in each agent message case instead of repeating the call.
 	scheduleWait := false
@@ -144,12 +157,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 
+		// Check for tab navigation keys (Alt+N, Alt+[, Alt+], Alt+w, Alt+p)
+		if m.handleTabKeys(msg) {
+			return m, tea.Batch(cmds...)
+		}
+
 		switch msg.Type {
 		case tea.KeyCtrlC:
 			m.quitting = true
 			return m, tea.Quit
 		case tea.KeyUp:
-			if m.state == stateIdle && len(m.inputHistory) > 0 {
+			if chat.state == stateIdle && len(m.inputHistory) > 0 && m.tabs.ActiveIdx() == 0 {
 				if m.historyIdx == -1 {
 					m.savedInput = m.textInput.Value()
 					m.historyIdx = len(m.inputHistory) - 1
@@ -160,7 +178,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.textInput.CursorEnd()
 			}
 		case tea.KeyDown:
-			if m.state == stateIdle && m.historyIdx != -1 {
+			if chat.state == stateIdle && m.historyIdx != -1 && m.tabs.ActiveIdx() == 0 {
 				m.historyIdx++
 				if m.historyIdx >= len(m.inputHistory) {
 					m.historyIdx = -1
@@ -172,7 +190,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.textInput.CursorEnd()
 			}
 		case tea.KeyEnter:
-			if m.state == stateIdle {
+			if chat.state == stateIdle && m.tabs.ActiveIdx() == 0 {
 				text := strings.TrimSpace(m.textInput.Value())
 				if text != "" {
 					// Check for file paths / file:// URIs to attach
@@ -181,7 +199,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						notice := lipgloss.NewStyle().
 							Foreground(m.theme.Accent).
 							Render(fmt.Sprintf("  Attached: %s (%d bytes)", att.name, len(att.content)))
-						m.history = append(m.history, historyEntry{content: notice})
+						chat.history = append(chat.history, historyEntry{content: notice})
 					}
 
 					// Append to history (skip duplicate of last entry)
@@ -191,28 +209,31 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.historyIdx = -1
 					m.savedInput = ""
 					m.textInput.SetValue("")
-					m.history = append(m.history, historyEntry{content: m.renderUserPanel(displayText(text, attachments))})
+					chat.history = append(chat.history, historyEntry{content: m.renderUserPanel(displayText(text, attachments))})
 					m.scrollToBottom()
 					m.InputChan <- text
 				}
 			}
 		case tea.KeyPgUp:
-			m.scrollOffset += m.height / 2
+			active := m.activeTab()
+			active.scrollOffset += m.height / 2
 		case tea.KeyPgDown:
-			m.scrollOffset -= m.height / 2
-			if m.scrollOffset < 0 {
-				m.scrollOffset = 0
+			active := m.activeTab()
+			active.scrollOffset -= m.height / 2
+			if active.scrollOffset < 0 {
+				active.scrollOffset = 0
 			}
 		}
 
 	case tea.MouseMsg:
+		active := m.activeTab()
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
-			m.scrollOffset += 3
+			active.scrollOffset += 3
 		case tea.MouseButtonWheelDown:
-			m.scrollOffset -= 3
-			if m.scrollOffset < 0 {
-				m.scrollOffset = 0
+			active.scrollOffset -= 3
+			if active.scrollOffset < 0 {
+				active.scrollOffset = 0
 			}
 		}
 
@@ -225,20 +246,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinnerIdx++
 		cmds = append(cmds, m.tickSpinner())
 
+	// --- Chat tab streaming messages (from main agent) ---
 	case TextDeltaMsg:
 		scheduleWait = true
-		m.state = stateStreaming
-		m.currentText.WriteString(msg.Text)
+		chat.state = stateStreaming
+		chat.currentText.WriteString(msg.Text)
 
 	case ThinkingDeltaMsg:
 		scheduleWait = true
-		m.state = stateThinking
-		m.currentThinking.WriteString(msg.Thinking)
+		chat.state = stateThinking
+		chat.currentThinking.WriteString(msg.Thinking)
 
 	case ToolStartMsg:
 		scheduleWait = true
-		m.state = stateToolExecuting
-		m.history = append(m.history, historyEntry{
+		chat.state = stateToolExecuting
+		chat.history = append(chat.history, historyEntry{
 			content: m.renderToolPanel(msg.Name, msg.ID, "", nil, false),
 		})
 		m.scrollToBottom()
@@ -250,7 +272,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if r.Result.Error != "" {
 			output = r.Result.Error
 		}
-		m.history = append(m.history, historyEntry{
+		chat.history = append(chat.history, historyEntry{
 			content: m.renderToolPanel(r.Call.Name, r.Call.ID, r.Result.Lang, &output, r.Result.IsError),
 		})
 		m.scrollToBottom()
@@ -258,29 +280,115 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case StreamDoneMsg:
 		scheduleWait = true
 		// Flush current text to history
-		if m.currentThinking.Len() > 0 {
-			m.history = append(m.history, historyEntry{
-				content: m.renderThinkingPanel(m.currentThinking.String()),
+		if chat.currentThinking.Len() > 0 {
+			chat.history = append(chat.history, historyEntry{
+				content: m.renderThinkingPanel(chat.currentThinking.String()),
 			})
-			m.currentThinking.Reset()
+			chat.currentThinking.Reset()
 		}
-		if m.currentText.Len() > 0 {
-			m.history = append(m.history, historyEntry{
-				content: m.renderAssistantPanel(m.currentText.String()),
+		if chat.currentText.Len() > 0 {
+			chat.history = append(chat.history, historyEntry{
+				content: m.renderAssistantPanel(chat.currentText.String()),
 			})
-			m.currentText.Reset()
+			chat.currentText.Reset()
 		}
-		m.state = stateIdle
+		chat.state = stateIdle
 		m.scrollToBottom()
 
 	case ErrorMsg:
 		scheduleWait = true
-		m.history = append(m.history, historyEntry{
+		chat.history = append(chat.history, historyEntry{
 			content: m.renderErrorPanel(msg.Err.Error()),
 		})
-		m.state = stateIdle
+		chat.state = stateIdle
 		m.scrollToBottom()
 
+	// --- Tab-routed streaming messages (from sub-agents) ---
+	case TabTextDeltaMsg:
+		scheduleWait = true
+		if tab, _ := m.tabs.FindByID(msg.TabID); tab != nil {
+			tab.state = stateStreaming
+			tab.currentText.WriteString(msg.Text)
+			if m.tabs.Active() != tab {
+				tab.Unread = true
+			}
+		}
+
+	case TabThinkingDeltaMsg:
+		scheduleWait = true
+		if tab, _ := m.tabs.FindByID(msg.TabID); tab != nil {
+			tab.state = stateThinking
+			tab.currentThinking.WriteString(msg.Thinking)
+			if m.tabs.Active() != tab {
+				tab.Unread = true
+			}
+		}
+
+	case TabToolStartMsg:
+		scheduleWait = true
+		if tab, _ := m.tabs.FindByID(msg.TabID); tab != nil {
+			tab.state = stateToolExecuting
+			tab.history = append(tab.history, historyEntry{
+				content: m.renderToolPanel(msg.Name, msg.ID, "", nil, false),
+			})
+			if m.tabs.Active() != tab {
+				tab.Unread = true
+			}
+		}
+
+	case TabToolResultMsg:
+		scheduleWait = true
+		if tab, _ := m.tabs.FindByID(msg.TabID); tab != nil {
+			r := msg.Result
+			output := r.Output
+			if r.Error != "" {
+				output = r.Error
+			}
+			tab.history = append(tab.history, historyEntry{
+				content: m.renderToolPanel(msg.Name, msg.ID, r.Lang, &output, r.IsError),
+			})
+			if m.tabs.Active() != tab {
+				tab.Unread = true
+			}
+		}
+
+	case TabStreamDoneMsg:
+		scheduleWait = true
+		if tab, _ := m.tabs.FindByID(msg.TabID); tab != nil {
+			// Flush current text to tab history
+			if tab.currentThinking.Len() > 0 {
+				tab.history = append(tab.history, historyEntry{
+					content: m.renderThinkingPanel(tab.currentThinking.String()),
+				})
+				tab.currentThinking.Reset()
+			}
+			if tab.currentText.Len() > 0 {
+				tab.history = append(tab.history, historyEntry{
+					content: m.renderAssistantPanel(tab.currentText.String()),
+				})
+				tab.currentText.Reset()
+			}
+			tab.state = stateIdle
+			// Cap agent tab history
+			if len(tab.history) > 200 {
+				tab.history = tab.history[len(tab.history)-200:]
+			}
+		}
+
+	case TabErrorMsg:
+		scheduleWait = true
+		if tab, _ := m.tabs.FindByID(msg.TabID); tab != nil {
+			tab.history = append(tab.history, historyEntry{
+				content: m.renderErrorPanel(msg.Err.Error()),
+			})
+			tab.state = stateIdle
+			tab.Status = TabError
+			if m.tabs.Active() != tab {
+				tab.Unread = true
+			}
+		}
+
+	// --- Global messages ---
 	case TokenUpdateMsg:
 		scheduleWait = true
 		m.inputTokens = msg.InputTokens
@@ -303,7 +411,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case StatusMsg:
 		scheduleWait = true
-		m.history = append(m.history, historyEntry{
+		chat.history = append(chat.history, historyEntry{
 			content: lipgloss.NewStyle().Foreground(m.theme.Dim).Render(msg.Text),
 		})
 		m.scrollToBottom()
@@ -315,31 +423,71 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, name := range msg.Models {
 			b.WriteString(fmt.Sprintf("  - %s\n", name))
 		}
-		m.history = append(m.history, historyEntry{
+		chat.history = append(chat.history, historyEntry{
 			content: lipgloss.NewStyle().Foreground(m.theme.Secondary).Render(b.String()),
 		})
 		m.scrollToBottom()
 
 	case ClearMsg:
 		scheduleWait = true
-		m.history = nil
-		m.scrollOffset = 0
+		chat.history = nil
+		chat.scrollOffset = 0
 
 	case SubAgentStartMsg:
-		m.history = append(m.history, historyEntry{
+		// Create a new tab for this sub-agent
+		agentTab := &Tab{
+			ID:     msg.ID,
+			Label:  msg.ID,
+			Kind:   TabAgent,
+			Status: TabRunning,
+		}
+		idx := m.tabs.Add(agentTab)
+
+		// Also add a compact notification to Chat tab
+		chat.history = append(chat.history, historyEntry{
 			content: m.renderSubAgentPanel(msg.ID, msg.Task, msg.Model),
 		})
 		m.scrollToBottom()
+
+		// Auto-switch to the new agent tab
+		if m.tabs.AutoSwitch() && !m.activeTab().UserPinned {
+			m.tabs.SetActive(idx)
+		}
+
 		cmds = append(cmds, m.waitForAgentMsg())
 
 	case SubAgentStepMsg:
+		// Add step to agent's tab history (not Chat)
+		if tab, _ := m.tabs.FindByID(msg.ID); tab != nil {
+			step := lipgloss.NewStyle().Foreground(m.theme.Dim).
+				Render(fmt.Sprintf("  ↳ %s", msg.ToolName))
+			tab.history = append(tab.history, historyEntry{content: step})
+			if m.tabs.Active() != tab {
+				tab.Unread = true
+			}
+		}
+		// Also add compact step to Chat tab
 		step := lipgloss.NewStyle().Foreground(m.theme.Dim).
 			Render(fmt.Sprintf("    ↳ [%s] %s", msg.ID, msg.ToolName))
-		m.history = append(m.history, historyEntry{content: step})
+		chat.history = append(chat.history, historyEntry{content: step})
 		m.scrollToBottom()
 		cmds = append(cmds, m.waitForAgentMsg())
 
 	case SubAgentDoneMsg:
+		// Update tab status
+		if tab, _ := m.tabs.FindByID(msg.ID); tab != nil {
+			if msg.IsError {
+				tab.Status = TabError
+			} else {
+				tab.Status = TabDone
+			}
+			// Auto-switch back to Chat if viewing the finished agent tab
+			if m.tabs.Active() == tab && !tab.UserPinned && m.tabs.AutoSwitch() {
+				m.tabs.SetActive(0)
+			}
+		}
+
+		// Add completion notice to Chat tab
 		label := "done"
 		color := m.theme.Secondary
 		if msg.IsError {
@@ -348,14 +496,27 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		done := lipgloss.NewStyle().Foreground(color).
 			Render(fmt.Sprintf("    ✓ [%s] %s", msg.ID, label))
-		m.history = append(m.history, historyEntry{content: done})
+		chat.history = append(chat.history, historyEntry{content: done})
 		m.scrollToBottom()
 		cmds = append(cmds, m.waitForAgentMsg())
+
+	case BashOutputMsg:
+		scheduleWait = true
+		if tab, _ := m.tabs.FindByID(msg.TabID); tab != nil {
+			tab.outputLines = append(tab.outputLines, msg.Lines...)
+			// Cap bash tab output
+			if len(tab.outputLines) > 500 {
+				tab.outputLines = tab.outputLines[len(tab.outputLines)-500:]
+			}
+			if m.tabs.Active() != tab {
+				tab.Unread = true
+			}
+		}
 
 	case ContextTrimMsg:
 		notice := lipgloss.NewStyle().Foreground(m.theme.Dim).Italic(true).
 			Render(fmt.Sprintf("  [Context trimmed: %d messages dropped to fit window]", msg.Dropped))
-		m.history = append(m.history, historyEntry{content: notice})
+		chat.history = append(chat.history, historyEntry{content: notice})
 		m.scrollToBottom()
 		cmds = append(cmds, m.waitForAgentMsg())
 
@@ -372,8 +533,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.waitForAgentMsg())
 	}
 
-	// Update text input
-	if m.state == stateIdle {
+	// Update text input only when on Chat tab and idle
+	if chat.state == stateIdle && m.tabs.ActiveIdx() == 0 {
 		var cmd tea.Cmd
 		m.textInput, cmd = m.textInput.Update(msg)
 		cmds = append(cmds, cmd)
@@ -387,46 +548,89 @@ func (m *Model) View() string {
 		return lipgloss.NewStyle().Foreground(m.theme.Primary).Render("Goodbye!\n")
 	}
 
+	// === Fixed header: tab bar (never scrolls) ===
+	tabBar := m.renderTabBar()
+	tabBarHeight := strings.Count(tabBar, "\n") + 1
+
+	// === Scrollable content ===
 	var sections []string
+	active := m.activeTab()
 
-	// Banner — only render once and cache it
-	if m.bannerText == "" {
-		m.bannerText = Banner(m.theme, m.model)
-	}
-	sections = append(sections, m.bannerText)
-
-	// History
-	for _, entry := range m.visibleHistory() {
-		sections = append(sections, entry.content)
-	}
-
-	// Current streaming content
-	if m.state == stateThinking && m.currentThinking.Len() > 0 {
-		sections = append(sections, m.renderThinkingPanel(m.currentThinking.String()))
-	}
-	if m.state == stateStreaming && m.currentText.Len() > 0 {
-		sections = append(sections, m.renderAssistantPanel(m.currentText.String()))
-	}
-
-	// Spinner for thinking/executing states
-	if m.state == stateThinking || m.state == stateToolExecuting {
-		label := "Thinking"
-		if m.state == stateToolExecuting {
-			label = "Executing tools"
+	switch active.Kind {
+	case TabChat:
+		// Banner — only render once and cache it
+		if m.bannerText == "" {
+			m.bannerText = Banner(m.theme, m.model)
 		}
-		sections = append(sections, fmt.Sprintf(" %s %s...", m.renderSpinner(), label))
+		sections = append(sections, m.bannerText)
+
+		// History
+		for _, entry := range active.history {
+			sections = append(sections, entry.content)
+		}
+
+		// Current streaming content
+		if active.state == stateThinking && active.currentThinking.Len() > 0 {
+			sections = append(sections, m.renderThinkingPanel(active.currentThinking.String()))
+		}
+		if active.state == stateStreaming && active.currentText.Len() > 0 {
+			sections = append(sections, m.renderAssistantPanel(active.currentText.String()))
+		}
+
+		// Spinner for thinking/executing states
+		if active.state == stateThinking || active.state == stateToolExecuting {
+			label := "Thinking"
+			if active.state == stateToolExecuting {
+				label = "Executing tools"
+			}
+			sections = append(sections, fmt.Sprintf(" %s %s...", m.renderSpinner(), label))
+		}
+
+	case TabAgent:
+		// Agent tab: show history + streaming
+		for _, entry := range active.history {
+			sections = append(sections, entry.content)
+		}
+		if active.state == stateThinking && active.currentThinking.Len() > 0 {
+			sections = append(sections, m.renderThinkingPanel(active.currentThinking.String()))
+		}
+		if active.state == stateStreaming && active.currentText.Len() > 0 {
+			sections = append(sections, m.renderAssistantPanel(active.currentText.String()))
+		}
+		if active.state == stateThinking || active.state == stateToolExecuting {
+			label := "Thinking"
+			if active.state == stateToolExecuting {
+				label = "Executing tools"
+			}
+			sections = append(sections, fmt.Sprintf(" %s %s...", m.renderSpinner(), label))
+		}
+
+	case TabBash:
+		// Bash tab: show rolling output lines
+		if len(active.outputLines) == 0 {
+			sections = append(sections, lipgloss.NewStyle().Foreground(m.theme.Dim).
+				Render("  (no output yet)"))
+		} else {
+			content := strings.Join(active.outputLines, "\n")
+			sections = append(sections, content)
+		}
 	}
 
 	body := strings.Join(sections, "\n")
 
-	// Calculate available height for body
+	// === Fixed footer: input + status bar ===
 	statusBarHeight := 1
 	inputHeight := 2
-	available := m.height - statusBarHeight - inputHeight - 1
+
+	// Calculate available height for scrollable body
+	available := m.height - tabBarHeight - statusBarHeight - inputHeight - 1
+	if available < 1 {
+		available = 1
+	}
 	bodyLines := strings.Split(body, "\n")
 
 	// Compute effective scroll offset (read-only, no mutation in View)
-	scrollOffset := m.scrollOffset
+	scrollOffset := active.scrollOffset
 	maxOffset := len(bodyLines) - available
 	if maxOffset < 0 {
 		maxOffset = 0
@@ -436,7 +640,6 @@ func (m *Model) View() string {
 	}
 
 	if len(bodyLines) > available && available > 0 {
-		// Show a window: lines from [end-available-scrollOffset, end-scrollOffset]
 		end := len(bodyLines) - scrollOffset
 		start := end - available
 		if start < 0 {
@@ -453,31 +656,78 @@ func (m *Model) View() string {
 		Width(m.width - 4)
 
 	prompt := ""
-	if m.state == stateIdle {
-		prompt = inputStyle.Render(m.textInput.View())
+	if m.tabs.ActiveIdx() == 0 {
+		// Chat tab: show text input
+		if m.chatTab().state == stateIdle {
+			prompt = inputStyle.Render(m.textInput.View())
+		} else {
+			prompt = inputStyle.Render(
+				lipgloss.NewStyle().Foreground(m.theme.Dim).Render("  (waiting for response...)"),
+			)
+		}
 	} else {
+		// Non-chat tabs: show hint
 		prompt = inputStyle.Render(
-			lipgloss.NewStyle().Foreground(m.theme.Dim).Render("  (waiting for response...)"),
+			lipgloss.NewStyle().Foreground(m.theme.Dim).Render("  Press Alt+1 to return to Chat"),
 		)
 	}
 
-	// Status bar
 	statusBar := m.renderStatusBar()
 
 	// Confirmation dialog overlay — renders on top of everything else
 	if m.pendingConfirm != nil {
-		return body + "\n" + m.renderConfirmDialog() + "\n" + statusBar
+		return tabBar + "\n" + body + "\n" + m.renderConfirmDialog() + "\n" + statusBar
 	}
 
-	return body + "\n" + prompt + "\n" + statusBar
+	return tabBar + "\n" + body + "\n" + prompt + "\n" + statusBar
+}
+
+// handleTabKeys processes tab-navigation key bindings.
+// Returns true if the key was consumed by tab navigation.
+func (m *Model) handleTabKeys(msg tea.KeyMsg) bool {
+	key := msg.String()
+
+	// Alt+number for 1-9 (bubbletea sends these as strings like "alt+1")
+	if len(key) == 5 && key[:4] == "alt+" && key[4] >= '1' && key[4] <= '9' {
+		idx := int(key[4] - '1')
+		if idx >= 0 && idx < m.tabs.Count() {
+			m.tabs.SetActive(idx)
+			if idx == 0 {
+				m.tabs.ChatTab().UserPinned = false
+			}
+		}
+		return true
+	}
+
+	switch key {
+	case "alt+[":
+		m.tabs.PrevTab()
+		return true
+	case "alt+]":
+		m.tabs.NextTab()
+		return true
+	case "alt+w":
+		// Close current non-Chat tab
+		if m.tabs.ActiveIdx() != 0 {
+			m.tabs.Remove(m.activeTab().ID)
+		}
+		return true
+	case "alt+p":
+		// Toggle pin on active tab
+		active := m.activeTab()
+		active.UserPinned = !active.UserPinned
+		return true
+	}
+
+	return false
 }
 
 func (m *Model) scrollToBottom() {
-	m.scrollOffset = 0
+	m.activeTab().scrollOffset = 0
 }
 
 func (m *Model) visibleHistory() []historyEntry {
-	return m.history
+	return m.activeTab().history
 }
 
 // renderConfirmDialog renders a modal confirmation prompt.

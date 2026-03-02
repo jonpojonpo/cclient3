@@ -111,6 +111,11 @@ func (a *Agent) Config() *config.Config {
 	return a.config
 }
 
+// Sessions returns the session manager for bash tab support.
+func (a *Agent) Sessions() *tools.SessionManager {
+	return a.sessions
+}
+
 // Run processes a user message through the agent loop.
 // Streams response, collects tool calls, executes in parallel, loops.
 func (a *Agent) Run(ctx context.Context, userInput string) error {

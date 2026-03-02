@@ -31,12 +31,13 @@ type SessionInfo struct {
 
 // bashSession is a long-lived bash subprocess with a line-oriented output feed.
 type bashSession struct {
-	mu          sync.Mutex   // guards history, lastCommand, lastUsedAt
+	mu          sync.Mutex   // guards history, lastCommand, lastUsedAt, observers
 	cmdMu       sync.Mutex   // serializes concurrent run calls (sentinel protocol requires it)
 	cmd         *exec.Cmd
 	stdin       io.WriteCloser
 	lines       chan string   // live output lines (buffered, written by pumpLoop)
 	history     []string     // ring buffer of last maxHistoryLines lines
+	observers   []chan string // registered observers get copies of output lines
 	lastCommand string
 	startedAt   time.Time
 	lastUsedAt  time.Time
@@ -89,6 +90,13 @@ func newBashSession() (*bashSession, error) {
 			s.history = append(s.history, line)
 			if len(s.history) > maxHistoryLines {
 				s.history = s.history[len(s.history)-maxHistoryLines:]
+			}
+			// Broadcast to observers (non-blocking)
+			for _, obs := range s.observers {
+				select {
+				case obs <- line:
+				default:
+				}
 			}
 			s.mu.Unlock()
 			select {
@@ -224,6 +232,25 @@ func (s *bashSession) isAlive() bool {
 	}
 }
 
+// AddObserver registers a channel to receive copies of all output lines.
+func (s *bashSession) AddObserver(ch chan string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.observers = append(s.observers, ch)
+}
+
+// RemoveObserver unregisters an observer channel.
+func (s *bashSession) RemoveObserver(ch chan string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, obs := range s.observers {
+		if obs == ch {
+			s.observers = append(s.observers[:i], s.observers[i+1:]...)
+			return
+		}
+	}
+}
+
 // kill terminates the session: closes stdin (signals bash to exit) and
 // sends SIGKILL to the entire process group to handle subprocesses.
 func (s *bashSession) kill() {
@@ -264,6 +291,36 @@ func (sm *SessionManager) acquire(name string) (*bashSession, error) {
 	}
 	sm.sessions[name] = s
 	return s, nil
+}
+
+// Acquire returns (or creates) the named session. Public wrapper around acquire.
+func (sm *SessionManager) Acquire(name string) error {
+	_, err := sm.acquire(name)
+	return err
+}
+
+// AddObserver registers an observer on the named session.
+// Returns false if the session doesn't exist.
+func (sm *SessionManager) AddObserver(name string, ch chan string) bool {
+	sm.mu.Lock()
+	s, ok := sm.sessions[name]
+	sm.mu.Unlock()
+	if !ok {
+		return false
+	}
+	s.AddObserver(ch)
+	return true
+}
+
+// RemoveObserver unregisters an observer from the named session.
+func (sm *SessionManager) RemoveObserver(name string, ch chan string) {
+	sm.mu.Lock()
+	s, ok := sm.sessions[name]
+	sm.mu.Unlock()
+	if !ok {
+		return
+	}
+	s.RemoveObserver(ch)
 }
 
 func (sm *SessionManager) Kill(name string) bool {

@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -11,7 +12,7 @@ import (
 )
 
 // RegisterBuiltins registers all built-in slash commands.
-func RegisterBuiltins(reg *Registry, ag *agent.Agent, msgChan chan tea.Msg) {
+func RegisterBuiltins(reg *Registry, ag *agent.Agent, msgChan chan tea.Msg, dm *display.Model) {
 	reg.Register(Command{
 		Name:        "/help",
 		Description: "Show available commands",
@@ -234,6 +235,170 @@ func RegisterBuiltins(reg *Registry, ag *agent.Agent, msgChan chan tea.Msg) {
 				state = "activated"
 			}
 			msgChan <- display.StatusMsg{Text: fmt.Sprintf("Skill %q %s", name, state)}
+			return nil
+		},
+	})
+
+	// --- Tab commands ---
+
+	reg.Register(Command{
+		Name:        "/tab",
+		Description: "Switch to a tab by number or name (/tab <n|name>)",
+		Handler: func(args string) error {
+			args = strings.TrimSpace(args)
+			if args == "" {
+				msgChan <- display.StatusMsg{Text: "Usage: /tab <number|name>"}
+				return nil
+			}
+			tm := dm.TabManager()
+			// Try as number first
+			if n, err := strconv.Atoi(args); err == nil {
+				idx := n - 1
+				if tm.SetActive(idx) {
+					msgChan <- display.StatusMsg{Text: fmt.Sprintf("Switched to tab %d", n)}
+				} else {
+					msgChan <- display.StatusMsg{Text: fmt.Sprintf("No tab %d (have %d tabs)", n, tm.Count())}
+				}
+				return nil
+			}
+			// Try as name/ID
+			if _, i := tm.FindByID(args); i >= 0 {
+				tm.SetActive(i)
+				msgChan <- display.StatusMsg{Text: fmt.Sprintf("Switched to tab: %s", args)}
+				return nil
+			}
+			// Try label match
+			for i, tab := range tm.Tabs() {
+				if strings.EqualFold(tab.Label, args) {
+					tm.SetActive(i)
+					msgChan <- display.StatusMsg{Text: fmt.Sprintf("Switched to tab: %s", tab.Label)}
+					return nil
+				}
+			}
+			msgChan <- display.StatusMsg{Text: fmt.Sprintf("Tab %q not found", args)}
+			return nil
+		},
+	})
+
+	reg.Register(Command{
+		Name:        "/tabs",
+		Description: "List open tabs with status",
+		Handler: func(args string) error {
+			tm := dm.TabManager()
+			var b strings.Builder
+			b.WriteString("Open tabs:\n")
+			for i, tab := range tm.Tabs() {
+				marker := "  "
+				if i == tm.ActiveIdx() {
+					marker = "► "
+				}
+				status := ""
+				switch tab.Kind {
+				case display.TabAgent:
+					switch tab.Status {
+					case display.TabRunning:
+						status = " [running]"
+					case display.TabDone:
+						status = " [done]"
+					case display.TabError:
+						status = " [error]"
+					}
+				case display.TabBash:
+					status = fmt.Sprintf(" [bash: %s]", tab.ID)
+				}
+				pin := ""
+				if tab.UserPinned {
+					pin = " (pinned)"
+				}
+				unread := ""
+				if tab.Unread {
+					unread = " *"
+				}
+				b.WriteString(fmt.Sprintf("%s%d: %s%s%s%s\n", marker, i+1, tab.Label, status, pin, unread))
+			}
+			msgChan <- display.StatusMsg{Text: b.String()}
+			return nil
+		},
+	})
+
+	reg.Register(Command{
+		Name:        "/newtab",
+		Description: "Open a new bash session tab (/newtab [session-name])",
+		Handler: func(args string) error {
+			name := strings.TrimSpace(args)
+			if name == "" {
+				name = fmt.Sprintf("bash-%d", dm.TabManager().Count())
+			}
+			// Create/acquire the bash session
+			if err := ag.Sessions().Acquire(name); err != nil {
+				msgChan <- display.ErrorMsg{Err: fmt.Errorf("session %q: %w", name, err)}
+				return nil
+			}
+
+			tm := dm.TabManager()
+			tabID := "bash-" + name
+			tab := &display.Tab{
+				ID:          tabID,
+				Label:       name,
+				Kind:        display.TabBash,
+				Status:      display.TabRunning,
+			}
+			tab.SetSessionName(name)
+			idx := tm.Add(tab)
+			tm.SetActive(idx)
+
+			// Start observer goroutine to pump bash output to the display
+			obsCh := make(chan string, 200)
+			ag.Sessions().AddObserver(name, obsCh)
+			go func() {
+				for line := range obsCh {
+					msgChan <- display.BashOutputMsg{TabID: tabID, Lines: []string{line}}
+				}
+			}()
+
+			msgChan <- display.StatusMsg{Text: fmt.Sprintf("Opened bash tab: %s", name)}
+			return nil
+		},
+	})
+
+	reg.Register(Command{
+		Name:        "/closetab",
+		Description: "Close a tab by number or name (/closetab [n|name])",
+		Handler: func(args string) error {
+			tm := dm.TabManager()
+			args = strings.TrimSpace(args)
+
+			if args == "" {
+				// Close current tab
+				if tm.ActiveIdx() == 0 {
+					msgChan <- display.StatusMsg{Text: "Cannot close the Chat tab"}
+					return nil
+				}
+				id := tm.Active().ID
+				tm.Remove(id)
+				msgChan <- display.StatusMsg{Text: "Tab closed"}
+				return nil
+			}
+
+			// Try as number
+			if n, err := strconv.Atoi(args); err == nil {
+				idx := n - 1
+				if idx <= 0 || idx >= tm.Count() {
+					msgChan <- display.StatusMsg{Text: fmt.Sprintf("Cannot close tab %d", n)}
+					return nil
+				}
+				id := tm.Tabs()[idx].ID
+				tm.Remove(id)
+				msgChan <- display.StatusMsg{Text: fmt.Sprintf("Closed tab %d", n)}
+				return nil
+			}
+
+			// Try as name/ID
+			if tm.Remove(args) {
+				msgChan <- display.StatusMsg{Text: fmt.Sprintf("Closed tab: %s", args)}
+				return nil
+			}
+			msgChan <- display.StatusMsg{Text: fmt.Sprintf("Tab %q not found", args)}
 			return nil
 		},
 	})

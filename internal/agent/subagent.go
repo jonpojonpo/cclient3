@@ -133,6 +133,10 @@ func (t *SubAgentTool) runTask(ctx context.Context, id, task, model, extraSystem
 		toolDefs[len(toolDefs)-1].CacheControl = ephemeral
 	}
 
+	// Create a tab-routed message channel for live streaming into this agent's tab.
+	tabChan := newTabMsgChan(id, t.msgChan)
+	defer close(tabChan)
+
 	const maxTurns = 30 // safety limit — prevent runaway sub-agents
 	for turn := 0; turn < maxTurns; turn++ {
 		if ctx.Err() != nil {
@@ -151,11 +155,14 @@ func (t *SubAgentTool) runTask(ctx context.Context, id, task, model, extraSystem
 			Tools:    toolDefs,
 		}
 
-		// Collect streaming response — no forwarding to display (silent collector).
-		collector := newBlockCollector(nil)
+		// Collect streaming response — forward to tab via tabChan.
+		collector := newBlockCollector(tabChan)
 		if err := t.client.StreamMessage(ctx, req, collector); err != nil {
 			return "", fmt.Errorf("turn %d stream error: %w", turn, err)
 		}
+
+		// Signal end of this streaming turn in the tab.
+		tabChan <- display.StreamDoneMsg{}
 
 		blocks := collector.buildAssistantBlocks()
 		conv.AddAssistant(blocks)
@@ -175,10 +182,22 @@ func (t *SubAgentTool) runTask(ctx context.Context, id, task, model, extraSystem
 		// Notify display of each tool the sub-agent is calling.
 		for _, tc := range toolCalls {
 			t.send(display.SubAgentStepMsg{ID: id, ToolName: tc.Name})
+			// Also send tool start to the tab
+			t.msgChan <- display.TabToolStartMsg{TabID: id, Name: tc.Name, ID: tc.ID}
 		}
 
 		// Execute tools in parallel.
 		results := t.executor.ExecuteAll(ctx, toolCalls)
+
+		// Send tool results to the tab
+		for _, r := range results {
+			t.msgChan <- display.TabToolResultMsg{
+				TabID:  id,
+				Name:   r.Call.Name,
+				ID:     r.Call.ID,
+				Result: r.Result,
+			}
+		}
 
 		var toolResultBlocks []api.ContentBlock
 		for _, r := range results {

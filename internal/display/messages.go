@@ -85,3 +85,51 @@ type SubAgentDoneMsg struct {
 	ID      string
 	IsError bool
 }
+
+// --- Tab-routed messages (from sub-agents streaming into their own tabs) ---
+
+// TabTextDeltaMsg routes a text delta to a specific agent tab.
+type TabTextDeltaMsg struct {
+	TabID string
+	Text  string
+}
+
+// TabThinkingDeltaMsg routes a thinking delta to a specific agent tab.
+type TabThinkingDeltaMsg struct {
+	TabID    string
+	Thinking string
+}
+
+// TabToolStartMsg notifies that a tool execution started in a sub-agent tab.
+type TabToolStartMsg struct {
+	TabID string
+	Name  string
+	ID    string
+}
+
+// TabToolResultMsg delivers a tool result to a sub-agent tab.
+type TabToolResultMsg struct {
+	TabID  string
+	Name   string
+	ID     string
+	Result tools.ToolResult
+}
+
+// TabStreamDoneMsg signals that a streaming turn completed in a sub-agent tab.
+type TabStreamDoneMsg struct {
+	TabID string
+}
+
+// TabErrorMsg delivers an error to a sub-agent tab.
+type TabErrorMsg struct {
+	TabID string
+	Err   error
+}
+
+// --- Bash tab messages ---
+
+// BashOutputMsg delivers new output lines from a bash session to a tab.
+type BashOutputMsg struct {
+	TabID string
+	Lines []string
+}
