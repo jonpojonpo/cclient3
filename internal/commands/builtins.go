@@ -402,4 +402,91 @@ func RegisterBuiltins(reg *Registry, ag *agent.Agent, msgChan chan tea.Msg, dm *
 			return nil
 		},
 	})
+
+	// --- Provider commands ---
+
+	reg.Register(Command{
+		Name:        "/provider",
+		Description: "Show or switch default AI provider (/provider [name])",
+		Handler: func(args string) error {
+			pr := ag.Providers()
+			args = strings.TrimSpace(args)
+			if args == "" {
+				var b strings.Builder
+				b.WriteString(fmt.Sprintf("Current provider: %s\n", pr.DefaultName()))
+				b.WriteString("Registered providers: " + strings.Join(pr.Names(), ", ") + "\n")
+				b.WriteString("Usage: /provider <name>  — switch default")
+				msgChan <- display.StatusMsg{Text: b.String()}
+				return nil
+			}
+			if pr.SetDefault(args) {
+				msgChan <- display.StatusMsg{Text: fmt.Sprintf("Default provider switched to: %s", args)}
+			} else {
+				msgChan <- display.StatusMsg{Text: fmt.Sprintf(
+					"Unknown provider %q. Registered: %s",
+					args, strings.Join(pr.Names(), ", "),
+				)}
+			}
+			return nil
+		},
+	})
+
+	reg.Register(Command{
+		Name:        "/providers",
+		Description: "List registered AI providers",
+		Handler: func(args string) error {
+			pr := ag.Providers()
+			var b strings.Builder
+			b.WriteString("Registered providers:\n")
+			for _, name := range pr.Names() {
+				marker := "  "
+				if name == pr.DefaultName() {
+					marker = "* "
+				}
+				b.WriteString(fmt.Sprintf("%s%s\n", marker, name))
+			}
+			b.WriteString("\nUse /provider <name> to switch default.")
+			msgChan <- display.StatusMsg{Text: b.String()}
+			return nil
+		},
+	})
+
+	reg.Register(Command{
+		Name:        "/eval",
+		Description: "Run a task on two providers in parallel and compare (/eval <task>)",
+		Handler: func(args string) error {
+			task := strings.TrimSpace(args)
+			if task == "" {
+				msgChan <- display.StatusMsg{Text: "Usage: /eval <task description>"}
+				return nil
+			}
+			pr := ag.Providers()
+			names := pr.Names()
+
+			// Need at least 2 providers to compare
+			if len(names) < 2 {
+				msgChan <- display.StatusMsg{Text: fmt.Sprintf(
+					"Need at least 2 providers for eval (have: %s). Add ollama_endpoint to config.yaml.",
+					strings.Join(names, ", "),
+				)}
+				return nil
+			}
+
+			// Craft a prompt that makes the main agent call sub_agent twice in parallel
+			prompt := fmt.Sprintf(
+				`Please evaluate this task by running TWO sub-agents in parallel with DIFFERENT providers:
+
+Task: %s
+
+Call sub_agent TWICE simultaneously with:
+1. provider: "%s" (default)
+2. provider: "%s" (alternative)
+
+After both complete, summarize each agent's response, then compare: which was more accurate, thorough, or concise? Note any interesting differences in approach.`,
+				task, names[0], names[1],
+			)
+			dm.InputChan <- prompt
+			return nil
+		},
+	})
 }

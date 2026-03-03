@@ -172,6 +172,9 @@ func matchesModelFamily(familyPrefix, candidateID string) bool {
 	return strings.HasPrefix(candidateID, familyPrefix)
 }
 
+// Name implements Provider.
+func (c *Client) Name() string { return "anthropic" }
+
 func (c *Client) setHeaders(req *http.Request) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", c.apiKey)

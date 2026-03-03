@@ -81,15 +81,16 @@ func TestSubAgentTool_CounterIncrements(t *testing.T) {
 // TestNewSubAgentTool verifies the constructor wires fields correctly.
 func TestNewSubAgentTool_Constructor(t *testing.T) {
 	client := api.NewClient("key", "https://example.com")
+	providers := api.NewProviderRegistry(client)
 	cfg := config.DefaultConfig()
 	reg := tools.NewRegistry()
 
-	tool := NewSubAgentTool(client, cfg, reg, nil)
+	tool := NewSubAgentTool(providers, cfg, reg, nil)
 	if tool == nil {
 		t.Fatal("NewSubAgentTool returned nil")
 	}
-	if tool.client != client {
-		t.Error("client not wired correctly")
+	if tool.providers != providers {
+		t.Error("providers not wired correctly")
 	}
 	if tool.cfg != cfg {
 		t.Error("cfg not wired correctly")
