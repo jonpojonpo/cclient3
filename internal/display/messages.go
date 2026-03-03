@@ -69,9 +69,10 @@ type ConfirmRequestMsg struct {
 
 // SubAgentStartMsg is sent when a sub-agent is spawned.
 type SubAgentStartMsg struct {
-	ID    string
-	Task  string
-	Model string
+	ID       string
+	Task     string
+	Model    string
+	Provider string // e.g. "anthropic", "ollama"
 }
 
 // SubAgentStepMsg is sent each time a sub-agent calls a tool.

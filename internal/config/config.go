@@ -17,6 +17,9 @@ type Config struct {
 	APIEndpoint        string  `yaml:"api_endpoint"`
 	SystemPrompt       string  `yaml:"system_prompt"`
 	APIKey             string  `yaml:"-"`
+	// Local / alternative provider settings
+	OllamaEndpoint  string `yaml:"ollama_endpoint"`
+	DefaultProvider string `yaml:"default_provider"`
 }
 
 func DefaultConfig() *Config {
@@ -28,6 +31,8 @@ func DefaultConfig() *Config {
 		MaxToolConcurrency: 6,
 		BashTimeout:        120,
 		APIEndpoint:        "https://api.anthropic.com/v1/messages",
+		OllamaEndpoint:     "http://localhost:11434",
+		DefaultProvider:    "anthropic",
 		SystemPrompt:       "You are a helpful AI assistant with access to tools for reading, writing, and searching files, running bash commands, and more. Use tools when appropriate to help the user.",
 	}
 }

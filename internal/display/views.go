@@ -97,10 +97,10 @@ func (m *Model) renderToolPanel(name, id, lang string, result *string, isError b
 }
 
 // renderSubAgentPanel renders a header card when a sub-agent is spawned.
-func (m *Model) renderSubAgentPanel(id, task, model string) string {
+// provider is shown alongside the model (e.g. "ollama" or "anthropic").
+func (m *Model) renderSubAgentPanel(id, task, model, provider string) string {
 	th := m.theme
 
-	// Truncate long task descriptions for display
 	taskDisplay := task
 	if len(taskDisplay) > 120 {
 		taskDisplay = taskDisplay[:117] + "..."
@@ -112,11 +112,14 @@ func (m *Model) renderSubAgentPanel(id, task, model string) string {
 		Padding(0, 1).
 		Width(m.width - 4)
 
+	providerTag := ""
+	if provider != "" && provider != "anthropic" {
+		providerTag = fmt.Sprintf(" via %s", provider)
+	}
 	label := lipgloss.NewStyle().Foreground(th.Secondary).Bold(true).
-		Render(fmt.Sprintf("  Sub-agent [%s] — %s", id, model))
+		Render(fmt.Sprintf("  Sub-agent [%s] — %s%s", id, model, providerTag))
 
-	body := lipgloss.NewStyle().Foreground(th.Dim).
-		Render(taskDisplay)
+	body := lipgloss.NewStyle().Foreground(th.Dim).Render(taskDisplay)
 
 	return label + "\n" + style.Render(body)
 }
@@ -159,7 +162,13 @@ func (m *Model) renderStatusBar() string {
 
 	tokenInfo := fmt.Sprintf("in:%d out:%d", m.inputTokens, m.outputTokens)
 	if m.cacheRead > 0 || m.cacheCreated > 0 {
-		tokenInfo += fmt.Sprintf(" $:%d", m.cacheRead)
+		tokenInfo += fmt.Sprintf(" cache:%d", m.cacheRead)
+	}
+	// Cumulative session cost
+	if m.sessionCostUSD >= 0.001 {
+		tokenInfo += fmt.Sprintf(" cost:$%.3f", m.sessionCostUSD)
+	} else if m.sessionCostUSD > 0 {
+		tokenInfo += " cost:<$0.001"
 	}
 	right := tokenStyle.Render(ctxGauge + " ctx:" + fmt.Sprintf("%d%%", ctxPct) + " " + tokenInfo)
 

@@ -13,33 +13,29 @@ import (
 	"github.com/jonpo/cclient3/internal/tools"
 )
 
-// SubAgentTool is a tool that spawns a fully autonomous child agent.
-// The child has its own conversation context and full tool access (except
-// sub_agent itself, to prevent unbounded recursion).
-// Multiple sub_agent calls in one response execute in parallel via the
-// normal parallel tool executor.
+// SubAgentTool spawns a fully autonomous child agent.
+// Multiple sub_agent calls in one response execute in parallel.
 type SubAgentTool struct {
-	client   *api.Client
-	cfg      *config.Config
-	registry *tools.Registry // child registry — no sub_agent registered
-	executor *tools.Executor
-	msgChan  chan tea.Msg
-	counter  atomic.Int64
+	providers *api.ProviderRegistry
+	cfg       *config.Config
+	registry  *tools.Registry // child registry — no sub_agent
+	executor  *tools.Executor
+	msgChan   chan tea.Msg
+	counter   atomic.Int64
 }
 
-// NewSubAgentTool builds a SubAgentTool using a pre-built child registry.
 func NewSubAgentTool(
-	client *api.Client,
+	providers *api.ProviderRegistry,
 	cfg *config.Config,
 	childRegistry *tools.Registry,
 	msgChan chan tea.Msg,
 ) *SubAgentTool {
 	return &SubAgentTool{
-		client:   client,
-		cfg:      cfg,
-		registry: childRegistry,
-		executor: tools.NewExecutor(childRegistry, 6),
-		msgChan:  msgChan,
+		providers: providers,
+		cfg:       cfg,
+		registry:  childRegistry,
+		executor:  tools.NewExecutor(childRegistry, 6),
+		msgChan:   msgChan,
 	}
 }
 
@@ -53,8 +49,10 @@ The sub-agent has its own conversation context and access to all tools
 It runs its own tool-use loop until it produces a final answer.
 
 Multiple sub_agent calls in a single response run IN PARALLEL — use this
-to decompose complex work into concurrent workstreams (e.g. one agent
-writes tests while another writes implementation).
+to decompose complex work into concurrent workstreams.
+
+Optionally specify 'provider' to route this agent to a different backend
+(e.g. "ollama" for a local model, "anthropic" for Claude).
 
 The sub-agent's final answer is returned as a tool result string.`
 }
@@ -65,11 +63,15 @@ func (t *SubAgentTool) InputSchema() json.RawMessage {
 		"properties": {
 			"task": {
 				"type": "string",
-				"description": "Full self-contained task description. The sub-agent has no memory of the parent conversation, so include all necessary context."
+				"description": "Full self-contained task description. Include all necessary context — the sub-agent has no memory of the parent conversation."
 			},
 			"model": {
 				"type": "string",
-				"description": "Optional model override (e.g. use a faster/cheaper model for simple sub-tasks). Defaults to the parent model."
+				"description": "Optional model override (e.g. use a faster model for simple sub-tasks). Defaults to the parent model."
+			},
+			"provider": {
+				"type": "string",
+				"description": "Optional provider to use: 'anthropic' (default) or 'ollama' for local inference. Falls back to default if unknown."
 			},
 			"system_prompt": {
 				"type": "string",
@@ -84,6 +86,7 @@ func (t *SubAgentTool) Execute(ctx context.Context, input json.RawMessage) tools
 	var params struct {
 		Task         string `json:"task"`
 		Model        string `json:"model"`
+		Provider     string `json:"provider"`
 		SystemPrompt string `json:"system_prompt"`
 	}
 	if err := json.Unmarshal(input, &params); err != nil {
@@ -98,10 +101,19 @@ func (t *SubAgentTool) Execute(ctx context.Context, input json.RawMessage) tools
 		model = t.cfg.Model
 	}
 
-	id := fmt.Sprintf("agent-%d", t.counter.Add(1))
-	t.send(display.SubAgentStartMsg{ID: id, Task: params.Task, Model: model})
+	// Resolve provider: named provider or fall back to default
+	provider := t.providers.Get(params.Provider)
+	providerName := provider.Name()
 
-	result, err := t.runTask(ctx, id, params.Task, model, params.SystemPrompt)
+	id := fmt.Sprintf("agent-%d", t.counter.Add(1))
+	t.send(display.SubAgentStartMsg{
+		ID:       id,
+		Task:     params.Task,
+		Model:    model,
+		Provider: providerName,
+	})
+
+	result, err := t.runTask(ctx, id, params.Task, model, params.SystemPrompt, provider)
 	if err != nil {
 		t.send(display.SubAgentDoneMsg{ID: id, IsError: true})
 		return tools.ToolResult{
@@ -112,12 +124,12 @@ func (t *SubAgentTool) Execute(ctx context.Context, input json.RawMessage) tools
 
 	t.send(display.SubAgentDoneMsg{ID: id, IsError: false})
 	return tools.ToolResult{
-		Output: fmt.Sprintf("[%s]\n%s", id, result),
+		Output: fmt.Sprintf("[%s via %s]\n%s", id, providerName, result),
 	}
 }
 
-// runTask runs the full agent loop for a sub-agent and returns its final answer.
-func (t *SubAgentTool) runTask(ctx context.Context, id, task, model, extraSystem string) (string, error) {
+// runTask runs the full agent loop for a sub-agent using the given provider.
+func (t *SubAgentTool) runTask(ctx context.Context, id, task, model, extraSystem string, provider api.Provider) (string, error) {
 	systemText := t.cfg.SystemPrompt
 	if extraSystem != "" {
 		systemText += "\n\n" + extraSystem
@@ -127,17 +139,15 @@ func (t *SubAgentTool) runTask(ctx context.Context, id, task, model, extraSystem
 	conv.AddUser(task)
 
 	toolDefs := t.registry.APIDefs()
-	// Mark last tool def with cache_control for efficiency on repeated calls.
 	ephemeral := &api.CacheControl{Type: "ephemeral"}
 	if len(toolDefs) > 0 {
 		toolDefs[len(toolDefs)-1].CacheControl = ephemeral
 	}
 
-	// Create a tab-routed message channel for live streaming into this agent's tab.
 	tabChan := newTabMsgChan(id, t.msgChan)
 	defer close(tabChan)
 
-	const maxTurns = 30 // safety limit — prevent runaway sub-agents
+	const maxTurns = 30
 	for turn := 0; turn < maxTurns; turn++ {
 		if ctx.Err() != nil {
 			return "", ctx.Err()
@@ -155,13 +165,11 @@ func (t *SubAgentTool) runTask(ctx context.Context, id, task, model, extraSystem
 			Tools:    toolDefs,
 		}
 
-		// Collect streaming response — forward to tab via tabChan.
 		collector := newBlockCollector(tabChan)
-		if err := t.client.StreamMessage(ctx, req, collector); err != nil {
+		if err := provider.StreamMessage(ctx, req, collector); err != nil {
 			return "", fmt.Errorf("turn %d stream error: %w", turn, err)
 		}
 
-		// Signal end of this streaming turn in the tab.
 		tabChan <- display.StreamDoneMsg{}
 
 		blocks := collector.buildAssistantBlocks()
@@ -169,7 +177,6 @@ func (t *SubAgentTool) runTask(ctx context.Context, id, task, model, extraSystem
 
 		toolCalls := collector.toolCalls()
 		if len(toolCalls) == 0 {
-			// No more tool calls — extract final text answer.
 			var sb string
 			for _, b := range blocks {
 				if b.Type == "text" {
@@ -179,17 +186,13 @@ func (t *SubAgentTool) runTask(ctx context.Context, id, task, model, extraSystem
 			return sb, nil
 		}
 
-		// Notify display of each tool the sub-agent is calling.
 		for _, tc := range toolCalls {
 			t.send(display.SubAgentStepMsg{ID: id, ToolName: tc.Name})
-			// Also send tool start to the tab
 			t.msgChan <- display.TabToolStartMsg{TabID: id, Name: tc.Name, ID: tc.ID}
 		}
 
-		// Execute tools in parallel.
 		results := t.executor.ExecuteAll(ctx, toolCalls)
 
-		// Send tool results to the tab
 		for _, r := range results {
 			t.msgChan <- display.TabToolResultMsg{
 				TabID:  id,

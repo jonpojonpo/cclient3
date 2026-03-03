@@ -84,9 +84,28 @@ func main() {
 	runInteractive(ctx, cfg)
 }
 
+// buildProviders constructs the provider registry from config.
+func buildProviders(cfg *config.Config) *api.ProviderRegistry {
+	anthropic := api.NewClient(cfg.APIKey, cfg.APIEndpoint)
+	registry := api.NewProviderRegistry(anthropic)
+
+	// Register Ollama if endpoint is configured (always register; it's free to try)
+	if cfg.OllamaEndpoint != "" {
+		registry.Register(api.NewOllamaProvider(cfg.OllamaEndpoint))
+	}
+
+	// Switch default provider if configured
+	if cfg.DefaultProvider != "" && cfg.DefaultProvider != "anthropic" {
+		registry.SetDefault(cfg.DefaultProvider)
+	}
+
+	return registry
+}
+
 func runSingleTurn(ctx context.Context, cfg *config.Config, prompt string) {
 	msgChan := make(chan tea.Msg, 100)
-	ag := agent.NewAgent(cfg, msgChan)
+	providers := buildProviders(cfg)
+	ag := agent.NewAgent(cfg, providers, msgChan)
 	defer ag.Shutdown()
 
 	text, err := ag.RunSingleTurn(ctx, prompt)
@@ -101,8 +120,9 @@ func runInteractive(ctx context.Context, cfg *config.Config) {
 	// Create display model
 	m := display.NewModel(cfg.Theme, cfg.Model)
 
-	// Create agent
-	ag := agent.NewAgent(cfg, m.AgentMsgChan)
+	// Build provider registry and create agent
+	providers := buildProviders(cfg)
+	ag := agent.NewAgent(cfg, providers, m.AgentMsgChan)
 
 	// Wire the confirm channel: display writes to it, agent reads from it
 	go func() {
