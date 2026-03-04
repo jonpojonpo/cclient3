@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -19,10 +20,11 @@ import (
 
 func main() {
 	var (
-		prompt     string
-		model      string
-		theme      string
-		showVer    bool
+		prompt      string
+		model       string
+		theme       string
+		ensembleArg string
+		showVer     bool
 	)
 
 	flag.StringVar(&prompt, "prompt", "", "Single-turn prompt (non-interactive mode)")
@@ -30,6 +32,8 @@ func main() {
 	flag.StringVar(&model, "model", "", "Override model name")
 	flag.StringVar(&model, "m", "", "Override model name (shorthand)")
 	flag.StringVar(&theme, "theme", "", "Override theme (cyber/ocean/ember/mono)")
+	flag.StringVar(&ensembleArg, "ensemble", "", "Start ensemble mode (auto, preset name, or empty for defaults)")
+	flag.StringVar(&ensembleArg, "e", "", "Start ensemble mode (shorthand)")
 	flag.BoolVar(&showVer, "version", false, "Show version")
 	flag.BoolVar(&showVer, "v", false, "Show version (shorthand)")
 	flag.Parse()
@@ -81,7 +85,7 @@ func main() {
 
 	// Interactive TUI mode — validate in background to avoid startup latency
 	go validateModel(ctx, cfg)
-	runInteractive(ctx, cfg)
+	runInteractive(ctx, cfg, ensembleArg)
 }
 
 // buildProviders constructs the provider registry from config.
@@ -116,7 +120,7 @@ func runSingleTurn(ctx context.Context, cfg *config.Config, prompt string) {
 	fmt.Println(text)
 }
 
-func runInteractive(ctx context.Context, cfg *config.Config) {
+func runInteractive(ctx context.Context, cfg *config.Config, ensembleArg string) {
 	// Create display model
 	m := display.NewModel(cfg.Theme, cfg.Model)
 
@@ -134,6 +138,20 @@ func runInteractive(ctx context.Context, cfg *config.Config) {
 	// Create command registry
 	cmdReg := commands.NewRegistry()
 	commands.RegisterBuiltins(cmdReg, ag, m.AgentMsgChan, m)
+
+	// If --ensemble flag was given, inject the command after startup
+	if ensembleArg != "" {
+		go func() {
+			// Build the /ensemble command from the flag + any remaining args
+			ensembleCmd := "/ensemble " + ensembleArg
+			// Include any positional args as the prompt
+			remaining := flag.Args()
+			if len(remaining) > 0 {
+				ensembleCmd += " " + strings.Join(remaining, " ")
+			}
+			m.InputChan <- ensembleCmd
+		}()
+	}
 
 	// Agent goroutine: reads from InputChan, processes messages
 	go func() {

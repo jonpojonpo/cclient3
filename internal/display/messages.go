@@ -148,9 +148,10 @@ type EnsembleAgentInfo struct {
 
 // EnsembleStartMsg creates the ensemble tab and shows the agent roster.
 type EnsembleStartMsg struct {
-	TabID  string
-	Agents []EnsembleAgentInfo
-	Prompt string
+	TabID    string
+	Agents   []EnsembleAgentInfo
+	Prompt   string
+	UserChan chan string // channel for user to send messages into the ensemble
 }
 
 // EnsembleUserMsg shows a user message in the ensemble transcript.

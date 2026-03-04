@@ -545,13 +545,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case EnsembleStartMsg:
 		scheduleWait = true
-		inputCh := make(chan string, 1)
 		ensTab := &Tab{
 			ID:                "ensemble-" + msg.TabID,
 			Label:             "Ensemble",
 			Kind:              TabEnsemble,
 			Status:            TabRunning,
-			EnsembleInputChan: inputCh,
+			EnsembleInputChan: msg.UserChan,
 			agentCount:        len(msg.Agents),
 		}
 		ensTab.history = append(ensTab.history, historyEntry{
