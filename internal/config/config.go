@@ -7,6 +7,21 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// EnsembleAgentDef defines a single agent in an ensemble preset.
+type EnsembleAgentDef struct {
+	Name        string `yaml:"name"`
+	Personality string `yaml:"personality"`
+	Model       string `yaml:"model"`
+	Provider    string `yaml:"provider"`
+	Color       string `yaml:"color"`
+}
+
+// EnsemblePreset is a named group of agents for ensemble mode.
+type EnsemblePreset struct {
+	Name   string             `yaml:"name"`
+	Agents []EnsembleAgentDef `yaml:"agents"`
+}
+
 type Config struct {
 	Model              string  `yaml:"model"`
 	MaxTokens          int     `yaml:"max_tokens"`
@@ -20,6 +35,8 @@ type Config struct {
 	// Local / alternative provider settings
 	OllamaEndpoint  string `yaml:"ollama_endpoint"`
 	DefaultProvider string `yaml:"default_provider"`
+	// Ensemble mode presets
+	EnsemblePresets []EnsemblePreset `yaml:"ensemble_presets"`
 }
 
 func DefaultConfig() *Config {

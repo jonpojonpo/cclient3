@@ -8,7 +8,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jonpo/cclient3/internal/agent"
+	"github.com/jonpo/cclient3/internal/api"
+	"github.com/jonpo/cclient3/internal/config"
 	"github.com/jonpo/cclient3/internal/display"
+	"github.com/jonpo/cclient3/internal/ensemble"
 )
 
 // RegisterBuiltins registers all built-in slash commands.
@@ -489,4 +492,148 @@ After both complete, summarize each agent's response, then compare: which was mo
 			return nil
 		},
 	})
+
+	// --- Ensemble commands ---
+
+	var ensembleCounter int
+
+	reg.Register(Command{
+		Name:        "/ensemble",
+		Description: "Start ensemble group chat (/ensemble [preset|auto] <prompt>)",
+		Handler: func(args string) error {
+			args = strings.TrimSpace(args)
+			if args == "" {
+				msgChan <- display.StatusMsg{Text: "Usage: /ensemble [preset-name|auto] <prompt>\n  auto: AI casts agents dynamically\n  <preset>: use a named preset from config\n  If no mode specified, uses default agents"}
+				return nil
+			}
+
+			cfg := ag.Config()
+			providers := ag.Providers()
+
+			// Parse mode and prompt
+			parts := strings.SplitN(args, " ", 2)
+			mode := parts[0]
+			prompt := ""
+			if len(parts) > 1 {
+				prompt = parts[1]
+			}
+
+			var agents []ensemble.AgentSpec
+
+			// Check if mode is a preset name
+			for _, preset := range cfg.EnsemblePresets {
+				if strings.EqualFold(preset.Name, mode) {
+					for _, ad := range preset.Agents {
+						agents = append(agents, ensemble.AgentSpec{
+							Name:        ad.Name,
+							Personality: ad.Personality,
+							Model:       ad.Model,
+							Provider:    ad.Provider,
+							Color:       ad.Color,
+						})
+					}
+					if prompt == "" {
+						msgChan <- display.StatusMsg{Text: fmt.Sprintf("Preset %q loaded with %d agents. Add a prompt: /ensemble %s <your question>", mode, len(agents), mode)}
+						return nil
+					}
+					break
+				}
+			}
+
+			// Auto-cast mode
+			if agents == nil && strings.EqualFold(mode, "auto") {
+				if prompt == "" {
+					msgChan <- display.StatusMsg{Text: "Usage: /ensemble auto <prompt>"}
+					return nil
+				}
+				msgChan <- display.StatusMsg{Text: "Casting agents for your prompt..."}
+
+				go func() {
+					castCtx := context.Background()
+					cast, err := ensemble.CastAgents(
+						castCtx,
+						providers.Default(),
+						cfg.Model,
+						prompt,
+						providers.Names(),
+						nil,
+					)
+					if err != nil {
+						msgChan <- display.ErrorMsg{Err: fmt.Errorf("ensemble casting failed: %w", err)}
+						return
+					}
+					startEnsemble(cast, prompt, cfg, providers, msgChan, &ensembleCounter)
+				}()
+				return nil
+			}
+
+			// Default agents (no preset matched, not auto)
+			if agents == nil {
+				// The entire args is the prompt, use default agents
+				prompt = args
+				agents = ensemble.DefaultPresets()
+			}
+
+			go startEnsemble(agents, prompt, cfg, providers, msgChan, &ensembleCounter)
+			return nil
+		},
+	})
+
+	reg.Register(Command{
+		Name:        "/ensembles",
+		Description: "List available ensemble presets",
+		Handler: func(args string) error {
+			cfg := ag.Config()
+			if len(cfg.EnsemblePresets) == 0 {
+				msgChan <- display.StatusMsg{Text: "No ensemble presets configured.\nUsage: /ensemble auto <prompt> — auto-cast agents\n       /ensemble <prompt> — use default agents (Sage, Spark, Sentinel)\n\nAdd presets to config.yaml under ensemble_presets:"}
+				return nil
+			}
+			var b strings.Builder
+			b.WriteString("Ensemble presets:\n")
+			for _, p := range cfg.EnsemblePresets {
+				b.WriteString(fmt.Sprintf("\n  %s (%d agents):\n", p.Name, len(p.Agents)))
+				for _, a := range p.Agents {
+					b.WriteString(fmt.Sprintf("    - %s", a.Name))
+					if a.Model != "" {
+						b.WriteString(fmt.Sprintf(" [%s]", a.Model))
+					}
+					if a.Provider != "" {
+						b.WriteString(fmt.Sprintf(" via %s", a.Provider))
+					}
+					b.WriteString("\n")
+				}
+			}
+			b.WriteString("\nUsage: /ensemble <preset-name> <prompt>")
+			msgChan <- display.StatusMsg{Text: b.String()}
+			return nil
+		},
+	})
+}
+
+// startEnsemble creates and runs an ensemble session.
+func startEnsemble(
+	agents []ensemble.AgentSpec,
+	prompt string,
+	cfg *config.Config,
+	providers *api.ProviderRegistry,
+	msgChan chan tea.Msg,
+	counter *int,
+) {
+	*counter++
+	tabID := fmt.Sprintf("ens-%d", *counter)
+	userChan := make(chan string, 1)
+
+	ens := ensemble.New(agents, providers, cfg, msgChan, userChan, tabID)
+
+	// Send start message to create the tab — pass userChan so the TUI routes input to us
+	msgChan <- display.EnsembleStartMsg{
+		TabID:    tabID,
+		Agents:   ens.AgentInfos(),
+		Prompt:   prompt,
+		UserChan: userChan,
+	}
+
+	// Run the ensemble — this blocks until done
+	ctx := context.Background()
+	ens.Run(ctx, prompt)
 }

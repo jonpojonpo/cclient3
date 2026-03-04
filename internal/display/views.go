@@ -128,6 +128,54 @@ func (m *Model) renderErrorPanel(text string) string {
 	return m.renderPanel(m.theme.Error, "  Error", text)
 }
 
+// renderEnsembleHeader renders the agent roster at the top of an ensemble tab.
+func (m *Model) renderEnsembleHeader(agents []EnsembleAgentInfo) string {
+	th := m.theme
+	var lines []string
+	lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(th.Accent).Render("  Ensemble Group Chat"))
+	lines = append(lines, "")
+	for _, a := range agents {
+		color := lipgloss.Color(a.Color)
+		name := lipgloss.NewStyle().Bold(true).Foreground(color).Render(a.Name)
+		meta := lipgloss.NewStyle().Foreground(th.Dim).Render(
+			fmt.Sprintf(" (%s via %s)", a.Model, a.Provider))
+		desc := ""
+		if a.Personality != "" {
+			short := a.Personality
+			if len(short) > 80 {
+				short = short[:77] + "..."
+			}
+			desc = "\n    " + lipgloss.NewStyle().Foreground(th.Dim).Italic(true).Render(short)
+		}
+		lines = append(lines, "  "+name+meta+desc)
+	}
+	lines = append(lines, "")
+	sep := lipgloss.NewStyle().Foreground(th.Dim).Render(strings.Repeat("─", m.width-4))
+	lines = append(lines, sep)
+	return strings.Join(lines, "\n")
+}
+
+// renderEnsembleSpeakerPanel renders a single agent's message in the ensemble.
+func (m *Model) renderEnsembleSpeakerPanel(speaker, text, hexColor string) string {
+	color := lipgloss.Color(hexColor)
+	content := text
+	if content != "" {
+		content = m.renderMarkdown(content)
+	}
+	style := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(color).
+		Padding(0, 1).
+		Width(m.width - 4)
+	label := lipgloss.NewStyle().Foreground(color).Bold(true).Render("  " + speaker)
+	return label + "\n" + style.Render(content)
+}
+
+// renderEnsembleUserPanel renders a user message in the ensemble chat.
+func (m *Model) renderEnsembleUserPanel(text string) string {
+	return m.renderPanel(m.theme.Accent, "  You", text)
+}
+
 func (m *Model) renderStatusBar() string {
 	th := m.theme
 
