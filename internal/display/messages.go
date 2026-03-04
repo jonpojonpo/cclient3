@@ -134,3 +134,66 @@ type BashOutputMsg struct {
 	TabID string
 	Lines []string
 }
+
+// --- Ensemble tab messages ---
+
+// EnsembleAgentInfo describes an agent in the ensemble roster.
+type EnsembleAgentInfo struct {
+	Name        string
+	Model       string
+	Provider    string
+	Personality string
+	Color       string
+}
+
+// EnsembleStartMsg creates the ensemble tab and shows the agent roster.
+type EnsembleStartMsg struct {
+	TabID  string
+	Agents []EnsembleAgentInfo
+	Prompt string
+}
+
+// EnsembleUserMsg shows a user message in the ensemble transcript.
+type EnsembleUserMsg struct {
+	TabID string
+	Text  string
+}
+
+// EnsembleSpeakerMsg signals a new agent is about to stream.
+type EnsembleSpeakerMsg struct {
+	TabID   string
+	Speaker string
+	Color   string
+	Model   string
+}
+
+// EnsembleTextDeltaMsg streams text from an agent into the ensemble tab.
+type EnsembleTextDeltaMsg struct {
+	TabID   string
+	Speaker string
+	Text    string
+	Color   string
+}
+
+// EnsembleTurnDoneMsg signals an agent finished their response.
+type EnsembleTurnDoneMsg struct {
+	TabID   string
+	Speaker string
+}
+
+// EnsembleRoundDoneMsg signals all agents finished a round, waiting for user.
+type EnsembleRoundDoneMsg struct {
+	TabID string
+}
+
+// EnsembleDoneMsg signals the ensemble session ended.
+type EnsembleDoneMsg struct {
+	TabID   string
+	Summary string
+}
+
+// EnsembleErrorMsg delivers an error in the ensemble tab.
+type EnsembleErrorMsg struct {
+	TabID string
+	Err   error
+}

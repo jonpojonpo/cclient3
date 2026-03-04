@@ -6,9 +6,10 @@ import "strings"
 type TabKind int
 
 const (
-	TabChat  TabKind = iota // always-present main chat
-	TabAgent                // sub-agent streaming output
-	TabBash                 // persistent bash session viewer
+	TabChat     TabKind = iota // always-present main chat
+	TabAgent                   // sub-agent streaming output
+	TabBash                    // persistent bash session viewer
+	TabEnsemble                // ensemble group chat
 )
 
 // TabStatus tracks the lifecycle of an agent/bash tab.
@@ -47,6 +48,12 @@ type Tab struct {
 
 	// Has unread content since last viewed
 	Unread bool
+
+	// Ensemble tab fields
+	EnsembleInputChan chan string // user messages into ensemble
+	currentSpeaker    string     // who is currently streaming
+	currentColor      string     // hex color of current speaker
+	agentCount        int        // number of agents in the ensemble
 }
 
 // TabManager manages the ordered set of tabs.

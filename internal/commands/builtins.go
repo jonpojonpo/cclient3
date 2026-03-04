@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jonpo/cclient3/internal/agent"
 	"github.com/jonpo/cclient3/internal/display"
+	"github.com/jonpo/cclient3/internal/ensemble"
 )
 
 // RegisterBuiltins registers all built-in slash commands.
