@@ -109,6 +109,8 @@ func DefaultPresets() []AgentSpec {
 		{
 			Name:        "Spark",
 			Personality: "A creative innovator who challenges assumptions, suggests novel approaches, and isn't afraid of unconventional solutions.",
+			Model:       "qwen3.5:9b",
+			Provider:    "ollama",
 			Color:       "#FF6B6B",
 		},
 		{

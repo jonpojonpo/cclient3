@@ -32,7 +32,17 @@ func (e *Executor) ExecuteAll(ctx context.Context, calls []ToolCall) []ToolCallR
 		wg.Add(1)
 		go func(idx int, tc ToolCall) {
 			defer wg.Done()
-			sem <- struct{}{}
+
+			// Respect cancellation before acquiring semaphore slot.
+			select {
+			case <-ctx.Done():
+				results[idx] = ToolCallResult{
+					Call:   tc,
+					Result: ToolResult{Error: ctx.Err().Error(), IsError: true},
+				}
+				return
+			case sem <- struct{}{}:
+			}
 			defer func() { <-sem }()
 
 			tool, err := e.registry.Get(tc.Name)

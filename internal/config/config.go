@@ -34,6 +34,7 @@ type Config struct {
 	APIKey             string  `yaml:"-"`
 	// Local / alternative provider settings
 	OllamaEndpoint  string `yaml:"ollama_endpoint"`
+	OllamaModel     string `yaml:"ollama_model"`
 	DefaultProvider string `yaml:"default_provider"`
 	// Ensemble mode presets
 	EnsemblePresets []EnsemblePreset `yaml:"ensemble_presets"`
@@ -49,6 +50,7 @@ func DefaultConfig() *Config {
 		BashTimeout:        120,
 		APIEndpoint:        "https://api.anthropic.com/v1/messages",
 		OllamaEndpoint:     "http://localhost:11434",
+		OllamaModel:        "qwen3.5:9b",
 		DefaultProvider:    "anthropic",
 		SystemPrompt:       "You are a helpful AI assistant with access to tools for reading, writing, and searching files, running bash commands, and more. Use tools when appropriate to help the user.",
 	}

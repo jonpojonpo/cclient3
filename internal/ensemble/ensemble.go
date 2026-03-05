@@ -50,6 +50,11 @@ type Ensemble struct {
 	userChan  chan string
 	providers *api.ProviderRegistry
 	cfg       *config.Config
+
+	// Round configuration
+	microRounds    int // sequential passes per user message (default 2)
+	responseTokens int // max output tokens per agent response (default 300)
+	thinkTokens    int // max output tokens for private scratchpad (default 150)
 }
 
 // New creates an Ensemble from agent specs and wires it up.
@@ -75,12 +80,15 @@ func New(
 	}
 
 	return &Ensemble{
-		agents:    agents,
-		tabID:     tabID,
-		msgChan:   msgChan,
-		userChan:  userChan,
-		providers: providers,
-		cfg:       cfg,
+		agents:         agents,
+		tabID:          tabID,
+		msgChan:        msgChan,
+		userChan:       userChan,
+		providers:      providers,
+		cfg:            cfg,
+		microRounds:    2,
+		responseTokens: 300,
+		thinkTokens:    150,
 	}
 }
 
@@ -105,18 +113,12 @@ func (e *Ensemble) AgentInfos() []display.EnsembleAgentInfo {
 }
 
 // Run starts the ensemble conversation loop.
-// It sends the initial prompt to all agents in parallel, collects responses,
-// then waits for user input to continue the discussion.
 func (e *Ensemble) Run(ctx context.Context, initialPrompt string) {
 	fullTabID := e.TabID()
 
-	// Add user prompt to transcript
 	e.addTranscript("You", initialPrompt)
-
-	// First round: all agents respond simultaneously
 	e.runRound(ctx, fullTabID)
 
-	// Loop: wait for user input, then run another round
 	for {
 		select {
 		case <-ctx.Done():
@@ -129,7 +131,6 @@ func (e *Ensemble) Run(ctx context.Context, initialPrompt string) {
 				return
 			}
 
-			// Check for done command
 			if strings.TrimSpace(strings.ToLower(userMsg)) == "/done" {
 				e.msgChan <- display.EnsembleDoneMsg{
 					TabID:   fullTabID,
@@ -138,31 +139,33 @@ func (e *Ensemble) Run(ctx context.Context, initialPrompt string) {
 				return
 			}
 
-			// Add user message to transcript
 			e.addTranscript("You", userMsg)
-
-			// Run another round
 			e.runRound(ctx, fullTabID)
 		}
 	}
 }
 
-// runRound fans out to all agents in parallel and waits for all to complete.
+// runRound executes N micro-rounds using a two-phase approach per micro-round:
+//
+//  1. Think phase (parallel): all agents silently read the transcript and write
+//     private scratchpad notes — their "mental draft" while waiting their turn.
+//
+//  2. Speak phase (sequential): agents respond one at a time. Each agent sees
+//     the transcript including whatever the previous agent just said, plus their
+//     own private scratchpad. Responses are short (responseTokens budget).
 func (e *Ensemble) runRound(ctx context.Context, fullTabID string) {
-	var wg sync.WaitGroup
+	for i := 0; i < e.microRounds; i++ {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 
-	for _, agent := range e.agents {
-		wg.Add(1)
-		go func(a AgentSpec) {
-			defer wg.Done()
-			e.runAgent(ctx, a, fullTabID)
-		}(agent)
+		scratchpads := e.thinkPhase(ctx)
+		e.speakPhase(ctx, fullTabID, scratchpads)
 	}
 
-	wg.Wait()
-
-	// Drain any user messages that arrived during the round
-	// and queue them for the next round
+	// Drain any user message that arrived during the round.
 	select {
 	case userMsg := <-e.userChan:
 		e.addTranscript("You", userMsg)
@@ -173,38 +176,119 @@ func (e *Ensemble) runRound(ctx context.Context, fullTabID string) {
 	e.msgChan <- display.EnsembleRoundDoneMsg{TabID: fullTabID}
 }
 
-// runAgent sends the transcript to a single agent and streams the response.
-func (e *Ensemble) runAgent(ctx context.Context, agent AgentSpec, fullTabID string) {
+// thinkPhase runs all agents in parallel to generate private scratchpad notes
+// from the current transcript state. The notes are never shown in the UI.
+func (e *Ensemble) thinkPhase(ctx context.Context) map[string]string {
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	scratchpads := make(map[string]string, len(e.agents))
+
+	for _, agent := range e.agents {
+		wg.Add(1)
+		go func(a AgentSpec) {
+			defer wg.Done()
+			notes := e.generateScratchpad(ctx, a)
+			mu.Lock()
+			scratchpads[a.Name] = notes
+			mu.Unlock()
+		}(agent)
+	}
+
+	wg.Wait()
+	return scratchpads
+}
+
+// speakPhase runs agents sequentially so each can build on what the previous said.
+func (e *Ensemble) speakPhase(ctx context.Context, fullTabID string, scratchpads map[string]string) {
+	for _, agent := range e.agents {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		e.runAgent(ctx, agent, fullTabID, scratchpads[agent.Name])
+	}
+}
+
+// generateScratchpad silently calls an agent to produce private listening notes.
+func (e *Ensemble) generateScratchpad(ctx context.Context, agent AgentSpec) string {
 	provider := e.providers.Get(agent.Provider)
 
-	// Build system prompt with personality
 	systemPrompt := fmt.Sprintf(
-		`You are "%s" in a group discussion with other AI agents and a human user.
+		`You are "%s" in a group discussion.
 
 %s
 
-Rules:
-- Be concise (2-4 paragraphs max)
-- Build on what others said, offer your unique perspective
-- Disagree constructively when you see things differently
-- Don't repeat what others have already said
-- Address other agents by name when responding to their points
-- Stay in character`,
-		agent.Name, agent.Personality)
+You are LISTENING. Write 3 brief private notes for yourself (one sentence each):
+- What specific point do you most want to respond to?
+- What unique angle or disagreement do you bring?
+- What direction do you want to push the discussion?
 
-	// Build the transcript as the user message
-	transcriptText := e.buildTranscriptText()
+These notes are private — be honest and specific.`,
+		agent.Name, agent.Personality)
 
 	req := &api.Request{
 		Model:     agent.Model,
-		MaxTokens: e.cfg.MaxTokens,
+		MaxTokens: e.thinkTokens,
 		System:    systemPrompt,
 		Messages: []api.Message{
-			{Role: "user", Content: transcriptText + "\n\n---\nContinue the discussion as " + agent.Name + ":"},
+			{Role: "user", Content: e.buildTranscriptText() + "\n\nWrite your private notes:"},
 		},
 	}
 
-	// Signal that this agent is starting
+	resp, err := provider.SendMessage(ctx, req)
+	if err != nil {
+		return ""
+	}
+
+	// Track token usage for cost accounting.
+	e.msgChan <- display.TokenUpdateMsg{
+		Model:        agent.Model,
+		InputTokens:  resp.Usage.InputTokens,
+		OutputTokens: resp.Usage.OutputTokens,
+	}
+
+	var text string
+	for _, block := range resp.Content {
+		if block.Type == "text" {
+			text += block.Text
+		}
+	}
+	return text
+}
+
+// runAgent sends the transcript (plus private scratchpad) to one agent and streams the response.
+func (e *Ensemble) runAgent(ctx context.Context, agent AgentSpec, fullTabID, scratchpad string) {
+	provider := e.providers.Get(agent.Provider)
+
+	notesSection := ""
+	if scratchpad != "" {
+		notesSection = fmt.Sprintf("\n\nYour private notes (what you planned to say):\n%s", scratchpad)
+	}
+
+	systemPrompt := fmt.Sprintf(
+		`You are "%s" in a group discussion with other AI agents and a human user.
+
+%s%s
+
+Rules:
+- Be VERY concise: 2-4 sentences max (like a chat message, not an essay)
+- Respond to what was most recently said — prioritise the last speaker
+- Address agents by name when responding to their points
+- Make ONE clear point per turn; don't try to summarise everything
+- Disagree constructively when you see things differently
+- Stay in character`,
+		agent.Name, agent.Personality, notesSection)
+
+	req := &api.Request{
+		Model:     agent.Model,
+		MaxTokens: e.responseTokens,
+		System:    systemPrompt,
+		Messages: []api.Message{
+			{Role: "user", Content: e.buildTranscriptText() + "\n\n---\nContinue the discussion as " + agent.Name + ":"},
+		},
+	}
+
 	e.msgChan <- display.EnsembleSpeakerMsg{
 		TabID:   fullTabID,
 		Speaker: agent.Name,
@@ -212,11 +296,11 @@ Rules:
 		Model:   agent.Model,
 	}
 
-	// Stream the response
 	collector := &ensembleCollector{
 		tabID:   fullTabID,
 		speaker: agent.Name,
 		color:   agent.Color,
+		model:   agent.Model,
 		msgChan: e.msgChan,
 	}
 
@@ -229,7 +313,15 @@ Rules:
 		return
 	}
 
-	// Add to transcript
+	// Send token usage to cost tracker.
+	if in, out := collector.tokenUsage(); in > 0 || out > 0 {
+		e.msgChan <- display.TokenUpdateMsg{
+			Model:        agent.Model,
+			InputTokens:  in,
+			OutputTokens: out,
+		}
+	}
+
 	responseText := collector.text()
 	if responseText != "" {
 		e.addTranscript(agent.Name, responseText)
@@ -281,15 +373,18 @@ func (e *Ensemble) buildSummary() string {
 	return sb.String()
 }
 
-// ensembleCollector implements api.StreamCallback to collect and stream agent output.
+// ensembleCollector implements api.StreamCallback to collect and forward agent output.
 type ensembleCollector struct {
 	tabID   string
 	speaker string
 	color   string
+	model   string
 	msgChan chan tea.Msg
 
 	mu      sync.Mutex
 	content strings.Builder
+	inTok   int
+	outTok  int
 }
 
 func (c *ensembleCollector) OnMessageStart(msg api.Response) {}
@@ -308,14 +403,22 @@ func (c *ensembleCollector) OnTextDelta(index int, text string) {
 	}
 }
 
-func (c *ensembleCollector) OnThinkingDelta(index int, thinking string) {
-	// Thinking is hidden in ensemble mode for cleaner group chat
-}
+func (c *ensembleCollector) OnThinkingDelta(index int, thinking string) {}
 
 func (c *ensembleCollector) OnInputJSONDelta(index int, partialJSON string) {}
 func (c *ensembleCollector) OnContentBlockStop(index int)                   {}
-func (c *ensembleCollector) OnMessageDelta(delta api.MessageDelta, usage *api.Usage) {}
+
+func (c *ensembleCollector) OnMessageDelta(delta api.MessageDelta, usage *api.Usage) {
+	if usage != nil {
+		c.mu.Lock()
+		c.inTok = usage.InputTokens
+		c.outTok = usage.OutputTokens
+		c.mu.Unlock()
+	}
+}
+
 func (c *ensembleCollector) OnMessageStop() {}
+
 func (c *ensembleCollector) OnError(err error) {
 	c.msgChan <- display.EnsembleErrorMsg{
 		TabID: c.tabID,
@@ -327,4 +430,10 @@ func (c *ensembleCollector) text() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.content.String()
+}
+
+func (c *ensembleCollector) tokenUsage() (int, int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.inTok, c.outTok
 }

@@ -350,21 +350,33 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// --- Tab-routed streaming (sub-agents) ---
 	case TabTextDeltaMsg:
 		scheduleWait = true
-		if tab, _ := m.tabs.FindByID(msg.TabID); tab != nil {
+		if tab, idx := m.tabs.FindByID(msg.TabID); tab != nil {
 			tab.state = stateStreaming
 			tab.currentText.WriteString(msg.Text)
 			if m.tabs.Active() != tab {
 				tab.Unread = true
+				// Auto-switch from a finished agent tab to this active one.
+				cur := m.tabs.Active()
+				if m.tabs.AutoSwitch() && !cur.UserPinned &&
+					cur.Kind == TabAgent && cur.Status != TabRunning {
+					m.tabs.SetActive(idx)
+				}
 			}
 		}
 
 	case TabThinkingDeltaMsg:
 		scheduleWait = true
-		if tab, _ := m.tabs.FindByID(msg.TabID); tab != nil {
+		if tab, idx := m.tabs.FindByID(msg.TabID); tab != nil {
 			tab.state = stateThinking
 			tab.currentThinking.WriteString(msg.Thinking)
 			if m.tabs.Active() != tab {
 				tab.Unread = true
+				// Auto-switch from a finished agent tab to this active one.
+				cur := m.tabs.Active()
+				if m.tabs.AutoSwitch() && !cur.UserPinned &&
+					cur.Kind == TabAgent && cur.Status != TabRunning {
+					m.tabs.SetActive(idx)
+				}
 			}
 		}
 
@@ -428,7 +440,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cacheCreated = msg.CacheCreationInputTokens
 		m.cacheRead = msg.CacheReadInputTokens
 		m.ctxTokensUsed = msg.InputTokens
-		m.sessionCostUSD += ComputeCost(m.model,
+		costModel := m.model
+		if msg.Model != "" {
+			costModel = msg.Model
+		}
+		m.sessionCostUSD += ComputeCost(costModel,
 			msg.InputTokens, msg.OutputTokens,
 			msg.CacheReadInputTokens, msg.CacheCreationInputTokens)
 
@@ -838,7 +854,7 @@ func (m *Model) handleTabKeys(msg tea.KeyMsg) bool {
 			}
 			return true
 		case 'p':
-			m.activeTab().UserPinned = !m.activeTab().UserPinned
+			m.tabs.PruneDone()
 			return true
 		}
 	}
@@ -866,7 +882,7 @@ func (m *Model) handleTabKeys(msg tea.KeyMsg) bool {
 		}
 		return true
 	case "alt+p":
-		m.activeTab().UserPinned = !m.activeTab().UserPinned
+		m.tabs.PruneDone()
 		return true
 	}
 

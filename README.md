@@ -39,7 +39,7 @@ Launch a **multi-agent group chat** where AI agents with distinct personalities 
 │                                                              │
 │  Sage (claude-sonnet-4-6 via anthropic)                      │
 │    A wise architect who values clean design...               │
-│  Spark (llama3 via ollama)                                   │
+│  Spark (qwen3.5:9b via ollama)                               │
 │    A creative innovator who challenges assumptions...        │
 │  Sentinel (claude-haiku-4-5-20251001 via anthropic)          │
 │    A security-minded skeptic who stress-tests ideas...       │
@@ -113,7 +113,7 @@ ensemble_presets:
         color: "#4ECDC4"
       - name: Pragmatist
         personality: "Values simplicity, shipping fast, and avoiding over-engineering"
-        model: llama3
+        model: qwen3.5:9b
         provider: ollama
         color: "#FF6B6B"
       - name: Security
@@ -330,7 +330,7 @@ ensemble_presets:
         color: "#4ECDC4"
       - name: Pragmatist
         personality: "Ship fast, avoid over-engineering"
-        model: llama3
+        model: qwen3.5:9b
         provider: ollama
         color: "#FF6B6B"
 

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync/atomic"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jonpo/cclient3/internal/api"
@@ -45,14 +47,21 @@ func (t *SubAgentTool) Description() string {
 	return `Spawn a fully autonomous sub-agent to complete a task independently.
 
 The sub-agent has its own conversation context and access to all tools
-(bash, file_read, file_write, file_edit, glob, grep, web_fetch).
+(bash, file_read, file_write, file_edit, glob, grep, web_fetch, web_search).
 It runs its own tool-use loop until it produces a final answer.
 
 Multiple sub_agent calls in a single response run IN PARALLEL — use this
 to decompose complex work into concurrent workstreams.
 
-Optionally specify 'provider' to route this agent to a different backend
-(e.g. "ollama" for a local model, "anthropic" for Claude).
+Optionally specify 'provider' to route this agent to a different backend:
+  - "anthropic" (default): full Claude API access
+  - "ollama": local inference (uses configured ollama_model, e.g. qwen3.5:9b)
+
+Optionally specify 'model' to use a specific model:
+  - claude-sonnet-4-6: best capability (default)
+  - claude-haiku-4-5-20251001: fast and cheap — ideal for simple sub-tasks
+    like parsing, summarising, formatting, or light research
+  - qwen3.5:9b: local/offline via ollama
 
 The sub-agent's final answer is returned as a tool result string.`
 }
@@ -96,14 +105,41 @@ func (t *SubAgentTool) Execute(ctx context.Context, input json.RawMessage) tools
 		return tools.ToolResult{Error: "task is required", IsError: true}
 	}
 
-	model := params.Model
-	if model == "" {
-		model = t.cfg.Model
-	}
-
-	// Resolve provider: named provider or fall back to default
+	// Resolve provider first so we can pick the right default model.
 	provider := t.providers.Get(params.Provider)
 	providerName := provider.Name()
+
+	model := params.Model
+	if model == "" {
+		if providerName == "ollama" && t.cfg.OllamaModel != "" {
+			model = t.cfg.OllamaModel
+		} else {
+			model = t.cfg.Model
+		}
+	}
+
+	// For Ollama, validate that the model actually exists before spawning.
+	if providerName == "ollama" {
+		ctx2, cancel := context.WithTimeout(ctx, 5*time.Second)
+		available, err := provider.ListModels(ctx2)
+		cancel()
+		if err == nil {
+			var names []string
+			found := false
+			for _, m := range available {
+				names = append(names, m.ID)
+				if m.ID == model {
+					found = true
+				}
+			}
+			if !found {
+				return tools.ToolResult{
+					Error:   fmt.Sprintf("ollama model %q not found. Available models: %s", model, strings.Join(names, ", ")),
+					IsError: true,
+				}
+			}
+		}
+	}
 
 	id := fmt.Sprintf("agent-%d", t.counter.Add(1))
 	t.send(display.SubAgentStartMsg{
@@ -222,7 +258,12 @@ func (t *SubAgentTool) runTask(ctx context.Context, id, task, model, extraSystem
 }
 
 func (t *SubAgentTool) send(msg tea.Msg) {
-	if t.msgChan != nil {
-		t.msgChan <- msg
+	if t.msgChan == nil {
+		return
+	}
+	select {
+	case t.msgChan <- msg:
+	default:
+		// Channel full — drop the message rather than blocking the agent goroutine.
 	}
 }
