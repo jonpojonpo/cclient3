@@ -57,7 +57,7 @@ func (t *WebFetchTool) Execute(ctx context.Context, input json.RawMessage) ToolR
 
 	maxBytes := params.MaxBytes
 	if maxBytes <= 0 {
-		maxBytes = 100 * 1024 // 100KB default
+		maxBytes = 8 * 1024 // 8KB default — keeps responses within Ollama context windows
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, t.timeout)

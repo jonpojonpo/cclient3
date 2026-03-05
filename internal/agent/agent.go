@@ -170,7 +170,7 @@ func (a *Agent) Run(ctx context.Context, userInput string) error {
 func (a *Agent) buildRequest() *api.Request {
 	ephemeral := &api.CacheControl{Type: "ephemeral"}
 
-	contextBudget := 190000 - a.config.MaxTokens
+	contextBudget := a.config.ContextSize - a.config.MaxTokens
 	if contextBudget < 10000 {
 		contextBudget = 10000
 	}

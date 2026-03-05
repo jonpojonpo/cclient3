@@ -38,6 +38,7 @@ func TestDefaultConfig(t *testing.T) {
 func TestLoad_EnvOverrides(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "test-key-12345")
 	t.Setenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+	t.Setenv("OPENAI_API_KEY", "openai-test-key")
 
 	cfg, err := Load()
 	if err != nil {
@@ -48,6 +49,9 @@ func TestLoad_EnvOverrides(t *testing.T) {
 	}
 	if cfg.Model != "claude-haiku-4-5-20251001" {
 		t.Errorf("Model = %q, want %q", cfg.Model, "claude-haiku-4-5-20251001")
+	}
+	if cfg.OpenAIAPIKey != "openai-test-key" {
+		t.Errorf("OpenAIAPIKey = %q, want %q", cfg.OpenAIAPIKey, "openai-test-key")
 	}
 }
 

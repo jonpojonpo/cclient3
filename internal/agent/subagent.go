@@ -55,12 +55,14 @@ to decompose complex work into concurrent workstreams.
 
 Optionally specify 'provider' to route this agent to a different backend:
   - "anthropic" (default): full Claude API access
+  - "openai": OpenAI API models (uses configured openai_model, e.g. gpt-5.4)
   - "ollama": local inference (uses configured ollama_model, e.g. qwen3.5:9b)
 
 Optionally specify 'model' to use a specific model:
   - claude-sonnet-4-6: best capability (default)
   - claude-haiku-4-5-20251001: fast and cheap — ideal for simple sub-tasks
     like parsing, summarising, formatting, or light research
+  - gpt-5.4: default OpenAI model for high-capability sub-tasks
   - qwen3.5:9b: local/offline via ollama
 
 The sub-agent's final answer is returned as a tool result string.`
@@ -80,7 +82,7 @@ func (t *SubAgentTool) InputSchema() json.RawMessage {
 			},
 			"provider": {
 				"type": "string",
-				"description": "Optional provider to use: 'anthropic' (default) or 'ollama' for local inference. Falls back to default if unknown."
+				"description": "Optional provider to use: 'anthropic' (default), 'openai', or 'ollama' for local inference."
 			},
 			"system_prompt": {
 				"type": "string",
@@ -104,6 +106,16 @@ func (t *SubAgentTool) Execute(ctx context.Context, input json.RawMessage) tools
 	if params.Task == "" {
 		return tools.ToolResult{Error: "task is required", IsError: true}
 	}
+	if params.Provider != "" && !t.providers.Has(params.Provider) {
+		return tools.ToolResult{
+			Error: fmt.Sprintf(
+				"unknown provider %q. Registered providers: %s",
+				params.Provider,
+				strings.Join(t.providers.Names(), ", "),
+			),
+			IsError: true,
+		}
+	}
 
 	// Resolve provider first so we can pick the right default model.
 	provider := t.providers.Get(params.Provider)
@@ -113,6 +125,8 @@ func (t *SubAgentTool) Execute(ctx context.Context, input json.RawMessage) tools
 	if model == "" {
 		if providerName == "ollama" && t.cfg.OllamaModel != "" {
 			model = t.cfg.OllamaModel
+		} else if providerName == "openai" && t.cfg.OpenAIModel != "" {
+			model = t.cfg.OpenAIModel
 		} else {
 			model = t.cfg.Model
 		}

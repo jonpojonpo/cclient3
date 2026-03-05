@@ -42,6 +42,12 @@ func (r *ProviderRegistry) Get(name string) Provider {
 	return r.providers[r.defaultName]
 }
 
+// Has returns true if a provider name is registered.
+func (r *ProviderRegistry) Has(name string) bool {
+	_, ok := r.providers[name]
+	return ok
+}
+
 // Default returns the default provider.
 func (r *ProviderRegistry) Default() Provider {
 	return r.providers[r.defaultName]
