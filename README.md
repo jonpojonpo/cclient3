@@ -39,7 +39,7 @@ Launch a **multi-agent group chat** where AI agents with distinct personalities 
 │                                                              │
 │  Sage (claude-sonnet-4-6 via anthropic)                      │
 │    A wise architect who values clean design...               │
-│  Spark (llama3 via ollama)                                   │
+│  Spark (qwen3.5:9b via ollama)                               │
 │    A creative innovator who challenges assumptions...        │
 │  Sentinel (claude-haiku-4-5-20251001 via anthropic)          │
 │    A security-minded skeptic who stress-tests ideas...       │
@@ -113,7 +113,7 @@ ensemble_presets:
         color: "#4ECDC4"
       - name: Pragmatist
         personality: "Values simplicity, shipping fast, and avoiding over-engineering"
-        model: llama3
+        model: qwen3.5:9b
         provider: ollama
         color: "#FF6B6B"
       - name: Security
@@ -160,8 +160,9 @@ When no preset is specified, ensemble uses three built-in agents:
 
 ### Multi-Provider Support
 - **Anthropic** — Claude models via the Anthropic API
+- **OpenAI** — GPT models via the OpenAI API (`/v1/chat/completions` + `/v1/models`)
 - **Ollama** — local models via the OpenAI-compatible endpoint
-- **Provider switching** — `/provider ollama` to switch defaults at runtime
+- **Provider switching** — `/provider openai` or `/provider ollama` to switch defaults at runtime
 - **Per-agent providers** — ensemble agents can each use different providers/models
 
 ### Agent Loop
@@ -235,6 +236,7 @@ When no preset is specified, ensemble uses three built-in agents:
 ### Prerequisites
 - Go 1.21+
 - `ANTHROPIC_API_KEY` environment variable set
+- (Optional) `OPENAI_API_KEY` for OpenAI-backed sub-agents and model listing
 - (Optional) Ollama running locally for multi-provider ensemble
 
 ### Build from source
@@ -317,7 +319,9 @@ api_endpoint: https://api.anthropic.com/v1/messages
 
 # Multi-provider support
 ollama_endpoint: http://localhost:11434
-default_provider: anthropic    # anthropic | ollama
+openai_endpoint: https://api.openai.com
+openai_model: gpt-5.4
+default_provider: anthropic    # anthropic | openai | ollama
 
 # Ensemble presets (optional)
 ensemble_presets:
@@ -330,7 +334,7 @@ ensemble_presets:
         color: "#4ECDC4"
       - name: Pragmatist
         personality: "Ship fast, avoid over-engineering"
-        model: llama3
+        model: qwen3.5:9b
         provider: ollama
         color: "#FF6B6B"
 
@@ -343,6 +347,7 @@ system_prompt: |
 | Variable | Description |
 |----------|-------------|
 | `ANTHROPIC_API_KEY` | Required — your Anthropic API key |
+| `OPENAI_API_KEY` | Optional — enables OpenAI provider (`openai`) |
 | `CLAUDE_MODEL` | Override the configured model |
 
 ---
@@ -369,7 +374,7 @@ cclient3/
 ├── cmd/cclient3/         Entry point, CLI flags, mode selection
 ├── internal/
 │   ├── agent/            Agent loop, conversation history, tool orchestration
-│   ├── api/              Anthropic + Ollama providers, SSE streaming, types
+│   ├── api/              Anthropic + OpenAI + Ollama providers, SSE streaming, types
 │   ├── ensemble/         Ensemble orchestration engine + auto-casting
 │   ├── tools/            Tool implementations + parallel executor
 │   ├── display/          Bubbletea TUI model, panels, themes, markdown

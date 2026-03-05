@@ -35,10 +35,15 @@ func (o *OllamaProvider) Name() string { return "ollama" }
 // --- OpenAI-compat wire types ---
 
 type oaRequest struct {
-	Model    string      `json:"model"`
-	Messages []oaMessage `json:"messages"`
-	Stream   bool        `json:"stream"`
-	Tools    []oaTool    `json:"tools,omitempty"`
+	Model         string           `json:"model"`
+	Messages      []oaMessage      `json:"messages"`
+	Stream        bool             `json:"stream"`
+	Tools         []oaTool         `json:"tools,omitempty"`
+	StreamOptions *oaStreamOptions `json:"stream_options,omitempty"`
+}
+
+type oaStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type oaMessage struct {

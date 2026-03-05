@@ -198,3 +198,23 @@ func (tm *TabManager) AutoSwitch() bool {
 func (tm *TabManager) SetAutoSwitch(on bool) {
 	tm.autoSwitch = on
 }
+
+// PruneDone removes all non-chat tabs that are in TabDone or TabError state.
+// Returns the number of tabs removed.
+func (tm *TabManager) PruneDone() int {
+	removed := 0
+	for i := len(tm.tabs) - 1; i > 0; i-- {
+		t := tm.tabs[i]
+		if t.Status == TabDone || t.Status == TabError {
+			if tm.activeIdx >= i {
+				tm.activeIdx--
+				if tm.activeIdx < 0 {
+					tm.activeIdx = 0
+				}
+			}
+			tm.tabs = append(tm.tabs[:i], tm.tabs[i+1:]...)
+			removed++
+		}
+	}
+	return removed
+}

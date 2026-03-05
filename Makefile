@@ -1,5 +1,5 @@
 BINARY := cclient3
-GO := GOROOT=/usr/lib/go-1.24 PATH=/usr/lib/go-1.24/bin:$$PATH go
+GO := /home/jonpo/go/bin/go
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)

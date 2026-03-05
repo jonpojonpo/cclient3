@@ -28,6 +28,7 @@ type ErrorMsg struct {
 }
 
 type TokenUpdateMsg struct {
+	Model                    string // which model generated these tokens (for correct cost calculation)
 	InputTokens              int
 	OutputTokens             int
 	CacheCreationInputTokens int

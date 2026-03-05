@@ -42,6 +42,7 @@ func NewAgent(cfg *config.Config, providers *api.ProviderRegistry, msgChan chan 
 	childRegistry.Register(tools.NewGlobTool())
 	childRegistry.Register(tools.NewGrepTool())
 	childRegistry.Register(tools.NewWebFetchTool())
+	childRegistry.Register(tools.NewWebSearchTool())
 
 	// Parent registry: all base tools + sub_agent.
 	registry := tools.NewRegistry()
@@ -52,6 +53,7 @@ func NewAgent(cfg *config.Config, providers *api.ProviderRegistry, msgChan chan 
 	registry.Register(tools.NewGlobTool())
 	registry.Register(tools.NewGrepTool())
 	registry.Register(tools.NewWebFetchTool())
+	registry.Register(tools.NewWebSearchTool())
 	registry.Register(NewSubAgentTool(providers, cfg, childRegistry, msgChan))
 
 	hooks := NewHookRegistry()
@@ -168,7 +170,7 @@ func (a *Agent) Run(ctx context.Context, userInput string) error {
 func (a *Agent) buildRequest() *api.Request {
 	ephemeral := &api.CacheControl{Type: "ephemeral"}
 
-	contextBudget := 190000 - a.config.MaxTokens
+	contextBudget := a.config.ContextSize - a.config.MaxTokens
 	if contextBudget < 10000 {
 		contextBudget = 10000
 	}
@@ -301,7 +303,10 @@ func (c *blockCollector) OnTextDelta(index int, text string) {
 	}
 	c.mu.Unlock()
 	if c.msgChan != nil {
-		c.msgChan <- display.TextDeltaMsg{Text: text}
+		select {
+		case c.msgChan <- display.TextDeltaMsg{Text: text}:
+		default:
+		}
 	}
 }
 
@@ -312,7 +317,10 @@ func (c *blockCollector) OnThinkingDelta(index int, thinking string) {
 	}
 	c.mu.Unlock()
 	if c.msgChan != nil {
-		c.msgChan <- display.ThinkingDeltaMsg{Thinking: thinking}
+		select {
+		case c.msgChan <- display.ThinkingDeltaMsg{Thinking: thinking}:
+		default:
+		}
 	}
 }
 

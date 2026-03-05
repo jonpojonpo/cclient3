@@ -97,6 +97,9 @@ func buildProviders(cfg *config.Config) *api.ProviderRegistry {
 	if cfg.OllamaEndpoint != "" {
 		registry.Register(api.NewOllamaProvider(cfg.OllamaEndpoint))
 	}
+	if cfg.OpenAIAPIKey != "" {
+		registry.Register(api.NewOpenAIProvider(cfg.OpenAIAPIKey, cfg.OpenAIEndpoint))
+	}
 
 	// Switch default provider if configured
 	if cfg.DefaultProvider != "" && cfg.DefaultProvider != "anthropic" {

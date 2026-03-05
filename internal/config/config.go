@@ -32,9 +32,16 @@ type Config struct {
 	APIEndpoint        string  `yaml:"api_endpoint"`
 	SystemPrompt       string  `yaml:"system_prompt"`
 	APIKey             string  `yaml:"-"`
+	// ContextSize is the model's context window in tokens. Used for conversation
+	// trimming. Default 190000 suits Claude; set lower for Ollama (e.g. 8192).
+	ContextSize int `yaml:"context_size"`
 	// Local / alternative provider settings
 	OllamaEndpoint  string `yaml:"ollama_endpoint"`
+	OllamaModel     string `yaml:"ollama_model"`
+	OpenAIEndpoint  string `yaml:"openai_endpoint"`
+	OpenAIModel     string `yaml:"openai_model"`
 	DefaultProvider string `yaml:"default_provider"`
+	OpenAIAPIKey    string `yaml:"-"`
 	// Ensemble mode presets
 	EnsemblePresets []EnsemblePreset `yaml:"ensemble_presets"`
 }
@@ -47,8 +54,12 @@ func DefaultConfig() *Config {
 		Theme:              "cyber",
 		MaxToolConcurrency: 6,
 		BashTimeout:        120,
+		ContextSize:        190000,
 		APIEndpoint:        "https://api.anthropic.com/v1/messages",
 		OllamaEndpoint:     "http://localhost:11434",
+		OllamaModel:        "qwen3.5:9b",
+		OpenAIEndpoint:     "https://api.openai.com",
+		OpenAIModel:        "gpt-5.4",
 		DefaultProvider:    "anthropic",
 		SystemPrompt:       "You are a helpful AI assistant with access to tools for reading, writing, and searching files, running bash commands, and more. Use tools when appropriate to help the user.",
 	}
@@ -83,6 +94,9 @@ func Load() (*Config, error) {
 	}
 	if model := os.Getenv("CLAUDE_MODEL"); model != "" {
 		cfg.Model = model
+	}
+	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
+		cfg.OpenAIAPIKey = key
 	}
 
 	return cfg, nil

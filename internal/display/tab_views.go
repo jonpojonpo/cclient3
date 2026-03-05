@@ -138,6 +138,7 @@ func (m *Model) renderSingleTab(tab *Tab, index int, isActive bool) string {
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(th.Dim).
+		BorderBottom(false).
 		Foreground(th.Dim).
 		Render(label)
 }
