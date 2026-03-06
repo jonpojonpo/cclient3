@@ -185,6 +185,8 @@ When no preset is specified, ensemble uses three built-in agents:
 | `file_edit` | Edit specific sections of a file |
 | `glob` | Find files matching glob patterns |
 | `grep` | Search file contents with regex |
+| `web_search` | Search the web via DuckDuckGo (no API key required) |
+| `web_fetch` | Fetch and extract readable content from any URL |
 
 ### Slash Commands
 | Command | Description |
@@ -362,6 +364,11 @@ Switch themes at runtime with `/theme <name>` or set the default in config.
 | `ocean` | Cool blues and teals |
 | `ember` | Warm orange and amber tones |
 | `mono` | Minimal grayscale |
+| `forest` | Earthy greens and natural tones |
+| `nord` | Arctic, bluish color palette |
+| `gruvbox` | Retro warm browns and muted colors |
+| `rose` | Soft pinks and rose tones |
+| `dracula` | Classic dark purple, pink, and green |
 
 Themes control terminal colors, panel borders, and glamour markdown styles. Add your own by dropping a JSON file in `internal/display/styles/`.
 
@@ -440,10 +447,10 @@ make clean     # Remove build artifacts
 ## Roadmap
 
 ### Near-term
-- [ ] **Web search tool** — give Claude live internet access
+- [x] **~~Web search tool~~** — ~~give Claude live internet access~~ **Done!** DuckDuckGo instant answers + `web_fetch` for full page content
 - [ ] **Image / vision support** — pass screenshots and images into the conversation
 - [ ] **Session persistence** — save and resume conversations across restarts
-- [ ] **More themes** — dracula, gruvbox, solarized, nord, etc.
+- [x] **~~More themes~~** — ~~dracula, gruvbox, solarized, nord, etc.~~ **Done!** forest, nord, gruvbox, rose added
 
 ### Medium-term
 - [ ] **MCP server support** — connect to any Model Context Protocol tool server

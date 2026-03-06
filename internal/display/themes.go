@@ -94,8 +94,18 @@ var Themes = map[string]Theme{
 		BG:        lipgloss.Color("#2D1B2E"),
 		Text:      lipgloss.Color("#F5E6E8"),
 	},
+	"dracula": {
+		Name:      "dracula",
+		Primary:   lipgloss.Color("#BD93F9"),
+		Secondary: lipgloss.Color("#FF79C6"),
+		Accent:    lipgloss.Color("#50FA7B"),
+		Dim:       lipgloss.Color("#6272A4"),
+		Error:     lipgloss.Color("#FF5555"),
+		BG:        lipgloss.Color("#282A36"),
+		Text:      lipgloss.Color("#F8F8F2"),
+	},
 }
 
 func ThemeNames() []string {
-	return []string{"cyber", "ocean", "ember", "mono", "nord", "gruvbox", "forest", "rose"}
+	return []string{"cyber", "ocean", "ember", "mono", "nord", "gruvbox", "forest", "rose", "dracula"}
 }
