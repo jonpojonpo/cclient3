@@ -13,8 +13,6 @@ A fast, beautiful terminal AI agent powered by Claude — with real-time streami
 ╚═══════════════════════════════════════════════════════════════╝
 ```
 
-> **Generate the demo GIF**: `vhs demo.tape` (requires [VHS](https://github.com/charmbracelet/vhs))
-
 ---
 
 ## What is this?
@@ -422,14 +420,9 @@ Done      Done      Done
 
 ## Demo
 
-A [VHS](https://github.com/charmbracelet/vhs) tape file is included to generate a demo GIF:
+![cclient3 demo](assets/demo.gif)
 
-```bash
-# Install VHS: https://github.com/charmbracelet/vhs#installation
-vhs demo.tape
-```
-
-This produces `demo.gif` showing the TUI startup, slash commands, and ensemble mode in action.
+> Recorded with [VHS](https://github.com/charmbracelet/vhs) — regenerate with `vhs demo.tape`
 
 ---
 
