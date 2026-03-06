@@ -13,6 +13,8 @@ A fast, beautiful terminal AI agent powered by Claude — with real-time streami
 ╚═══════════════════════════════════════════════════════════════╝
 ```
 
+![cclient3 demo](assets/demo.gif)
+
 ---
 
 ## What is this?
@@ -418,13 +420,6 @@ Done      Done      Done
 
 ---
 
-## Demo
-
-![cclient3 demo](assets/demo.gif)
-
-> Recorded with [VHS](https://github.com/charmbracelet/vhs) — regenerate with `vhs demo.tape`
-
----
 
 ## Development
 
