@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -20,11 +19,10 @@ import (
 
 func main() {
 	var (
-		prompt      string
-		model       string
-		theme       string
-		ensembleArg string
-		showVer     bool
+		prompt  string
+		model   string
+		theme   string
+		showVer bool
 	)
 
 	flag.StringVar(&prompt, "prompt", "", "Single-turn prompt (non-interactive mode)")
@@ -32,8 +30,6 @@ func main() {
 	flag.StringVar(&model, "model", "", "Override model name")
 	flag.StringVar(&model, "m", "", "Override model name (shorthand)")
 	flag.StringVar(&theme, "theme", "", "Override theme (cyber/ocean/ember/mono)")
-	flag.StringVar(&ensembleArg, "ensemble", "", "Start ensemble mode (auto, preset name, or empty for defaults)")
-	flag.StringVar(&ensembleArg, "e", "", "Start ensemble mode (shorthand)")
 	flag.BoolVar(&showVer, "version", false, "Show version")
 	flag.BoolVar(&showVer, "v", false, "Show version (shorthand)")
 	flag.Parse()
@@ -58,10 +54,12 @@ func main() {
 		cfg.Theme = theme
 	}
 
-	// Validate API key
-	if cfg.APIKey == "" {
+	// Validate API key — only required when Anthropic is the default provider.
+	usingAnthropic := cfg.DefaultProvider == "" || cfg.DefaultProvider == "anthropic"
+	if cfg.APIKey == "" && usingAnthropic {
 		fmt.Fprintln(os.Stderr, "Error: ANTHROPIC_API_KEY not set")
 		fmt.Fprintln(os.Stderr, "Set it with: export ANTHROPIC_API_KEY=your-key-here")
+		fmt.Fprintln(os.Stderr, "(or set default_provider: ollama/openai in config.yaml)")
 		os.Exit(1)
 	}
 
@@ -78,14 +76,18 @@ func main() {
 
 	// Single-turn mode — validate synchronously since we need the correct model
 	if prompt != "" {
-		validateModel(ctx, cfg)
+		if usingAnthropic {
+			validateModel(ctx, cfg)
+		}
 		runSingleTurn(ctx, cfg, prompt)
 		return
 	}
 
 	// Interactive TUI mode — validate in background to avoid startup latency
-	go validateModel(ctx, cfg)
-	runInteractive(ctx, cfg, ensembleArg)
+	if usingAnthropic {
+		go validateModel(ctx, cfg)
+	}
+	runInteractive(ctx, cfg)
 }
 
 // buildProviders constructs the provider registry from config.
@@ -123,7 +125,7 @@ func runSingleTurn(ctx context.Context, cfg *config.Config, prompt string) {
 	fmt.Println(text)
 }
 
-func runInteractive(ctx context.Context, cfg *config.Config, ensembleArg string) {
+func runInteractive(ctx context.Context, cfg *config.Config) {
 	// Create display model
 	m := display.NewModel(cfg.Theme, cfg.Model)
 
@@ -141,20 +143,6 @@ func runInteractive(ctx context.Context, cfg *config.Config, ensembleArg string)
 	// Create command registry
 	cmdReg := commands.NewRegistry()
 	commands.RegisterBuiltins(cmdReg, ag, m.AgentMsgChan, m)
-
-	// If --ensemble flag was given, inject the command after startup
-	if ensembleArg != "" {
-		go func() {
-			// Build the /ensemble command from the flag + any remaining args
-			ensembleCmd := "/ensemble " + ensembleArg
-			// Include any positional args as the prompt
-			remaining := flag.Args()
-			if len(remaining) > 0 {
-				ensembleCmd += " " + strings.Join(remaining, " ")
-			}
-			m.InputChan <- ensembleCmd
-		}()
-	}
 
 	// Agent goroutine: reads from InputChan, processes messages
 	go func() {

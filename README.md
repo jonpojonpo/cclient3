@@ -1,6 +1,6 @@
 # cclient3
 
-A fast, beautiful terminal AI agent powered by Claude — with real-time streaming, parallel tool execution, multi-provider support, and **ensemble mode** for multi-agent group chat.
+A fast, clean terminal AI agent powered by Claude — with real-time streaming, adaptive thinking, parallel tool execution, dynamic sub-agent workflows, and multi-provider support (Anthropic / OpenAI / Ollama).
 
 ![cclient3 demo](assets/demo.gif)
 
@@ -8,157 +8,42 @@ A fast, beautiful terminal AI agent powered by Claude — with real-time streami
 
 ## What is this?
 
-`cclient3` is a terminal-native AI agent client for [Claude](https://www.anthropic.com/claude). It gives Claude real tools — bash, file I/O, grep, glob — and executes them in parallel while streaming responses live to a rich, themed TUI.
+`cclient3` is a terminal-native AI agent client for [Claude](https://www.anthropic.com/claude). It gives Claude real tools — bash, file I/O, grep, glob, web search — and executes them in parallel while streaming responses live to a rich, themed TUI.
 
 Think of it as a local Claude Code you can hack on yourself.
 
 ---
 
-## Ensemble Mode
-
-Launch a **multi-agent group chat** where AI agents with distinct personalities discuss your prompt collaboratively — like a Slack channel with AI participants.
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│ ╭──────────╮╭──────────╮╭──────────╮                         │
-│ │ 1: Chat  ││ 2: Ensemble ⠹ ││ 3: bash  │                   │
-│ ╰──────────╯╰──────────╯╰──────────╯                         │
-│                                                              │
-│  Ensemble Group Chat                                         │
-│                                                              │
-│  Sage (claude-sonnet-4-6 via anthropic)                      │
-│    A wise architect who values clean design...               │
-│  Spark (qwen3.5:9b via ollama)                               │
-│    A creative innovator who challenges assumptions...        │
-│  Sentinel (claude-haiku-4-5-20251001 via anthropic)          │
-│    A security-minded skeptic who stress-tests ideas...       │
-│  ──────────────────────────────────────────────────────       │
-│                                                              │
-│  ╭─ You ─────────────────────────────────────────────╮       │
-│  │ What are the tradeoffs of microservices vs         │       │
-│  │ monoliths for a startup?                           │       │
-│  ╰────────────────────────────────────────────────────╯       │
-│                                                              │
-│  ╭─ Sage ────────────────────────────────────────────╮       │
-│  │ For an early-stage startup, I'd strongly advocate  │       │
-│  │ starting with a well-structured monolith...        │       │
-│  ╰────────────────────────────────────────────────────╯       │
-│                                                              │
-│  ╭─ Spark ───────────────────────────────────────────╮       │
-│  │ Hold on — let's challenge that assumption. What if │       │
-│  │ the team already has microservices experience?...   │       │
-│  ╰────────────────────────────────────────────────────╯       │
-│                                                              │
-│  ╭─ Sentinel ────────────────────────────────────────╮       │
-│  │ Both of you are overlooking the security surface   │       │
-│  │ area. Microservices multiply your attack vectors...│       │
-│  ╰────────────────────────────────────────────────────╯       │
-│                                                              │
-│  ─── Round complete. Type a message to continue. ───         │
-│                                                              │
-│ ┌────────────────────────────────────────────────────┐       │
-│ │ What about developer experience?                    │       │
-│ └────────────────────────────────────────────────────┘       │
-│ claude-sonnet-4-6     [cyber]     in:4521 out:892 cost:$0.02 │
-└──────────────────────────────────────────────────────────────┘
-```
-
-### How it works
-
-1. **You provide a prompt** — a question, task, or topic for discussion
-2. **Agents respond simultaneously** — all agents receive the shared transcript and respond in parallel
-3. **You direct the conversation** — type messages to steer the discussion, ask follow-ups, or challenge points
-4. **Diverse perspectives** — agents use different models (Claude + Ollama) with unique personalities
-5. **Type `/done` to end** — get a summary and return to normal chat
-
-### Quick start
-
-```bash
-# Default agents (Sage, Spark, Sentinel)
-/ensemble Design a REST API for a todo app
-
-# AI auto-casts agents based on your topic
-/ensemble auto Should we use Rust or Go for our new CLI tool?
-
-# Use a preset from config
-/ensemble code-review Review the authentication module
-
-# CLI flag to start directly in ensemble mode
-./cclient3 --ensemble auto "Compare React vs Svelte for a dashboard"
-```
-
-### Configuring presets
-
-Add custom agent rosters to `~/.config/cclient3/config.yaml`:
-
-```yaml
-ensemble_presets:
-  - name: code-review
-    agents:
-      - name: Architect
-        personality: "Focuses on system design, API boundaries, and scalability"
-        model: claude-sonnet-4-6
-        provider: anthropic
-        color: "#4ECDC4"
-      - name: Pragmatist
-        personality: "Values simplicity, shipping fast, and avoiding over-engineering"
-        model: qwen3.5:9b
-        provider: ollama
-        color: "#FF6B6B"
-      - name: Security
-        personality: "Hunts for vulnerabilities, injection risks, and auth issues"
-        model: claude-haiku-4-5-20251001
-        provider: anthropic
-        color: "#FFE66D"
-
-  - name: brainstorm
-    agents:
-      - name: Visionary
-        personality: "Thinks 10 years ahead, explores moonshot ideas"
-        color: "#DDA0DD"
-      - name: Critic
-        personality: "Devil's advocate — finds flaws and asks hard questions"
-        color: "#FFA07A"
-      - name: Builder
-        personality: "Turns ideas into concrete implementation plans"
-        color: "#98FB98"
-```
-
-### Default agents
-
-When no preset is specified, ensemble uses three built-in agents:
-
-| Agent | Personality | Color |
-|-------|-------------|-------|
-| **Sage** | Wise architect — clean design, proven patterns, long-term thinking | Teal |
-| **Spark** | Creative innovator — challenges assumptions, unconventional solutions | Red |
-| **Sentinel** | Security skeptic — stress-tests ideas, finds edge cases | Yellow |
-
----
-
 ## Features
+
+### Modern model support
+- **Latest Claude models** — defaults to `claude-opus-4-8`; works with `claude-sonnet-5`, `claude-sonnet-4-6`, `claude-haiku-4-5`, and `claude-fable-5`
+- **Adaptive thinking** — automatically enabled on models that support it; the model decides when and how much to reason, with summarized reasoning streamed to the TUI
+- **Effort control** — set `effort: low|medium|high|xhigh|max` in config to trade cost against reasoning depth (stripped automatically on models that don't support it)
+- **Model-aware requests** — parameters the target model would reject (e.g. sampling params on Opus 4.7+) are never sent
+- **Model validation** — the configured model is checked against the live `/v1/models` API at startup, with auto-correction to the nearest match
+
+### Dynamic workflows
+- **Parallel sub-agents** — the agent decomposes big tasks into concurrent workstreams via the `sub_agent` tool; each sub-agent streams into its own tab
+- **Effort-tiered routing** — sub-tasks are routed to the cheapest capable model: `fast` shorthand dispatches to the configured `fast_model` (default `claude-haiku-4-5`) for parsing/summarising/light research, while hard reasoning stays on the default model
+- **Cross-provider delegation** — sub-agents can run on a different backend (`provider: ollama` for local inference, `provider: openai`)
+- **Parallel tool execution** — independent tool calls in one response run concurrently via a bounded semaphore pool
+- **Safe context trimming** — long conversations are trimmed to the window without ever orphaning a tool result from its tool call
 
 ### Terminal UI
 - **Real-time streaming** — responses appear token by token as they're generated
-- **Tab management** — Chat, Ensemble, Agent, and Bash tabs with `Alt+1-9` switching
-- **4 built-in themes** — `cyber` (default), `ocean`, `ember`, `mono`
+- **Tab management** — Chat, Agent, and Bash tabs with `Alt+1-9` switching
+- **9 built-in themes** — `cyber` (default), `ocean`, `ember`, `mono`, `forest`, `nord`, `gruvbox`, `rose`, `dracula`
 - **Markdown rendering** — code blocks, headers, lists, all beautifully rendered per-theme
-- **Panel layout** — distinct zones for user input, assistant response, tool activity, and errors
 - **Token meter** — live display of input / output / cache tokens + cumulative session cost
-- **Spinner feedback** — visual indicator when the agent is thinking or executing tools
+- **Confirmation prompts** — risky bash commands require an explicit y/n
 
 ### Multi-Provider Support
-- **Anthropic** — Claude models via the Anthropic API
+- **Anthropic** — Claude models via the Anthropic API (default)
 - **OpenAI** — GPT models via the OpenAI API (`/v1/chat/completions` + `/v1/models`)
-- **Ollama** — local models via the OpenAI-compatible endpoint
-- **Provider switching** — `/provider openai` or `/provider ollama` to switch defaults at runtime
-- **Per-agent providers** — ensemble agents can each use different providers/models
-
-### Agent Loop
-- **Agentic tool use** — Claude can call tools, inspect results, and loop until done
-- **Parallel tool execution** — up to 16 tool calls run concurrently via a semaphore pool
-- **Sub-agents** — autonomous child agents in their own tabs for parallel workstreams
-- **Conversation memory** — full multi-turn history maintained across the session
+- **Ollama** — local models, no API key required
+- **Provider switching** — `/provider openai` or `/provider ollama` to switch defaults at runtime; the request model switches with it automatically
+- **Anthropic key optional** — run fully local with `default_provider: ollama` and no `ANTHROPIC_API_KEY`
 
 ### Prompt Caching
 - **3-breakpoint cache strategy** — system prompt, tool definitions, and prior messages are cached
@@ -176,13 +61,12 @@ When no preset is specified, ensemble uses three built-in agents:
 | `grep` | Search file contents with regex |
 | `web_search` | Search the web via DuckDuckGo (no API key required) |
 | `web_fetch` | Fetch and extract readable content from any URL |
+| `sub_agent` | Spawn autonomous parallel sub-agents (any provider/model) |
 
 ### Slash Commands
 | Command | Description |
 |---------|-------------|
 | `/help` | Show available commands |
-| `/ensemble [preset\|auto] <prompt>` | Start a multi-agent ensemble discussion |
-| `/ensembles` | List available ensemble presets |
 | `/model <name>` | Switch to a different model |
 | `/model list` | List available models from the API |
 | `/model next` | Cycle through available models |
@@ -215,10 +99,9 @@ When no preset is specified, ensemble uses three built-in agents:
 | `Enter` | Submit message |
 | `Ctrl+C` | Exit |
 
-### Three Modes
+### Two Modes
 - **Interactive TUI** — rich full-screen terminal UI (default)
 - **Single-turn CLI** — `cclient3 -p "your prompt"` for scripting and automation
-- **Ensemble mode** — `cclient3 --ensemble auto` for multi-agent group chat
 
 ---
 
@@ -226,9 +109,9 @@ When no preset is specified, ensemble uses three built-in agents:
 
 ### Prerequisites
 - Go 1.21+
-- `ANTHROPIC_API_KEY` environment variable set
-- (Optional) `OPENAI_API_KEY` for OpenAI-backed sub-agents and model listing
-- (Optional) Ollama running locally for multi-provider ensemble
+- `ANTHROPIC_API_KEY` environment variable set (not required if `default_provider` is `ollama`/`openai`)
+- (Optional) `OPENAI_API_KEY` for the OpenAI provider
+- (Optional) Ollama running locally for local inference
 
 ### Build from source
 
@@ -267,20 +150,7 @@ export ANTHROPIC_API_KEY=your_key_here
 
 ```bash
 ./cclient3 -p "summarize this repo for me"
-./cclient3 --prompt "what files are in the current directory?" --model claude-opus-4-6
-```
-
-### Ensemble mode
-
-```bash
-# Start with auto-cast agents
-./cclient3 --ensemble auto
-
-# Start with a preset
-./cclient3 --ensemble code-review
-
-# Prompt is provided interactively or via positional args
-./cclient3 -e auto "Design a caching strategy"
+./cclient3 --prompt "what files are in the current directory?" --model claude-sonnet-5
 ```
 
 ### Flags
@@ -289,7 +159,6 @@ export ANTHROPIC_API_KEY=your_key_here
 |------|-------|-------------|
 | `--prompt` | `-p` | Single-turn prompt (non-interactive) |
 | `--model` | `-m` | Override configured model |
-| `--ensemble` | `-e` | Start ensemble mode (auto, preset name) |
 | `--theme` | | Override default theme |
 | `--version` | `-v` | Print version info |
 
@@ -300,44 +169,32 @@ export ANTHROPIC_API_KEY=your_key_here
 Default config file: `~/.config/cclient3/config.yaml` (falls back to `./config.yaml`)
 
 ```yaml
-model: claude-sonnet-4-6       # Model to use
-max_tokens: 8192               # Max response tokens
-temperature: 0.7               # Sampling temperature (0-1)
-theme: cyber                   # Default theme: cyber | ocean | ember | mono
+model: claude-opus-4-8         # Default model (most capable)
+fast_model: claude-haiku-4-5   # Cheap/fast model for simple sub-tasks
+max_tokens: 16384              # Max response tokens
+# effort: high                 # low | medium | high | xhigh | max
+theme: cyber                   # Default theme: cyber | ocean | ember | mono | ...
 max_tool_concurrency: 16       # Max parallel tool calls
 bash_timeout: 120              # Bash command timeout (seconds)
 api_endpoint: https://api.anthropic.com/v1/messages
+# context_size: 1000000        # Context window used for trimming (set ~8192 for Ollama)
 
 # Multi-provider support
 ollama_endpoint: http://localhost:11434
+ollama_model: qwen3.5:9b
 openai_endpoint: https://api.openai.com
 openai_model: gpt-5.4
 default_provider: anthropic    # anthropic | openai | ollama
 
-# Ensemble presets (optional)
-ensemble_presets:
-  - name: code-review
-    agents:
-      - name: Architect
-        personality: "System design and scalability focus"
-        model: claude-sonnet-4-6
-        provider: anthropic
-        color: "#4ECDC4"
-      - name: Pragmatist
-        personality: "Ship fast, avoid over-engineering"
-        model: qwen3.5:9b
-        provider: ollama
-        color: "#FF6B6B"
-
 system_prompt: |
-  You are a helpful AI assistant with access to tools...
+  You are a powerful AI agent with access to tools...
 ```
 
 **Environment variable overrides:**
 
 | Variable | Description |
 |----------|-------------|
-| `ANTHROPIC_API_KEY` | Required — your Anthropic API key |
+| `ANTHROPIC_API_KEY` | Your Anthropic API key (required for the anthropic provider) |
 | `OPENAI_API_KEY` | Optional — enables OpenAI provider (`openai`) |
 | `CLAUDE_MODEL` | Override the configured model |
 
@@ -369,9 +226,8 @@ Themes control terminal colors, panel borders, and glamour markdown styles. Add 
 cclient3/
 ├── cmd/cclient3/         Entry point, CLI flags, mode selection
 ├── internal/
-│   ├── agent/            Agent loop, conversation history, tool orchestration
+│   ├── agent/            Agent loop, conversation history, sub-agents, tool orchestration
 │   ├── api/              Anthropic + OpenAI + Ollama providers, SSE streaming, types
-│   ├── ensemble/         Ensemble orchestration engine + auto-casting
 │   ├── tools/            Tool implementations + parallel executor
 │   ├── display/          Bubbletea TUI model, panels, themes, markdown
 │   ├── commands/         Slash command registry and built-ins
@@ -384,31 +240,28 @@ cclient3/
 - Agent runs in a background goroutine, receiving input via channels
 - Bubbletea handles the UI in the main thread
 - Tools execute in a bounded semaphore pool (default 16 concurrent)
-- Ensemble agents run in parallel goroutines with shared transcript
-- All agent/ensemble → display communication is via typed message channels
+- Sub-agents run as parallel tool executions, each streaming into its own tab
+- All agent → display communication is via typed message channels
 
-**Ensemble flow:**
+**Dynamic workflow flow:**
 
 ```
-User prompt → shared transcript
-            ↓
-  ┌─────────┼─────────┐
-  ↓         ↓         ↓
-Agent A   Agent B   Agent C     (parallel goroutines)
-  ↓         ↓         ↓
-Stream    Stream    Stream      (concurrent to TUI)
-  ↓         ↓         ↓
-Done      Done      Done
-            ↓
-  sync.WaitGroup.Wait()
-            ↓
-  Transcript updated
-            ↓
-  Wait for user input → next round
+User task
+    ↓
+Main agent (claude-opus-4-8, adaptive thinking)
+    ↓ decomposes
+  ┌─────────────┬─────────────┐
+  ↓             ↓             ↓
+sub_agent     sub_agent     sub_agent      (parallel tool calls)
+"fast" model  default       provider:ollama
+  ↓             ↓             ↓
+own tab       own tab       own tab        (concurrent streaming)
+  └─────────────┴─────────────┘
+    ↓ results return as tool_results
+Main agent synthesizes → final answer
 ```
 
 ---
-
 
 ## Development
 
@@ -424,24 +277,19 @@ make clean     # Remove build artifacts
 ## Roadmap
 
 ### Near-term
-- [x] **~~Web search tool~~** — ~~give Claude live internet access~~ **Done!** DuckDuckGo instant answers + `web_fetch` for full page content
 - [ ] **Image / vision support** — pass screenshots and images into the conversation
 - [ ] **Session persistence** — save and resume conversations across restarts
-- [x] **~~More themes~~** — ~~dracula, gruvbox, solarized, nord, etc.~~ **Done!** forest, nord, gruvbox, rose added
+- [ ] **Server-side web search/fetch** — use Anthropic's hosted `web_search`/`web_fetch` tools
 
 ### Medium-term
 - [ ] **MCP server support** — connect to any Model Context Protocol tool server
 - [ ] **Plugin system** — drop-in tools without recompiling
-- [x] **~~Multi-agent mode~~** — ~~spawn sub-agents for parallel workstreams~~ **Done!** Ensemble mode
-- [x] **~~Local model support~~** — ~~Ollama / llama.cpp backend~~ **Done!** Ollama provider
 - [ ] **Diff viewer** — pretty inline diffs for file edits
-- [ ] **Token budget warnings** — alert when approaching context limits
-- [ ] **Ensemble voting/synthesis** — have agents vote on best approach, auto-synthesize
+- [ ] **Compaction** — server-side context summarization for very long sessions
 
 ### Longer-term
 - [ ] **TUI multiplexer** — split-pane layout for agent + file explorer + shell
 - [ ] **Workspace snapshots** — checkpoint and rollback file system state
-- [ ] **Voice input** — whisper integration for spoken prompts
 - [ ] **Structured output mode** — JSON schema-constrained responses
 
 ---

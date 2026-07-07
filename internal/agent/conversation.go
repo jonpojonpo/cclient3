@@ -66,11 +66,26 @@ func (c *Conversation) TrimForWindow(budgetTokens int) int {
 	const minTail = 6
 	dropped := 0
 	for c.TokenEstimate() > budgetTokens && len(c.Messages) > minHead+minTail {
-		copy(c.Messages[minHead:], c.Messages[minHead+1:])
-		c.Messages = c.Messages[:len(c.Messages)-1]
+		c.dropAt(minHead)
 		dropped++
+		// Never leave an orphaned tool_result as the next survivor: a
+		// tool_result whose tool_use was just dropped is an API error.
+		for len(c.Messages) > minHead+minTail && startsWithToolResult(c.Messages[minHead]) {
+			c.dropAt(minHead)
+			dropped++
+		}
 	}
 	return dropped
+}
+
+func (c *Conversation) dropAt(i int) {
+	copy(c.Messages[i:], c.Messages[i+1:])
+	c.Messages = c.Messages[:len(c.Messages)-1]
+}
+
+func startsWithToolResult(msg api.Message) bool {
+	blocks, ok := msg.Content.([]api.ContentBlock)
+	return ok && len(blocks) > 0 && blocks[0].Type == "tool_result"
 }
 
 func (c *Conversation) Save(path string) error {

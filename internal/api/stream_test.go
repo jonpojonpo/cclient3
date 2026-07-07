@@ -11,6 +11,7 @@ type testCallback struct {
 	messageStarted  bool
 	textDeltas      []string
 	thinkingDeltas  []string
+	signatureDeltas []string
 	jsonDeltas      []string
 	blockStarts     []ResponseBlock
 	blockStops      []int
@@ -28,6 +29,9 @@ func (c *testCallback) OnTextDelta(index int, text string) {
 }
 func (c *testCallback) OnThinkingDelta(index int, thinking string) {
 	c.thinkingDeltas = append(c.thinkingDeltas, thinking)
+}
+func (c *testCallback) OnSignatureDelta(index int, signature string) {
+	c.signatureDeltas = append(c.signatureDeltas, signature)
 }
 func (c *testCallback) OnInputJSONDelta(index int, partialJSON string) {
 	c.jsonDeltas = append(c.jsonDeltas, partialJSON)
