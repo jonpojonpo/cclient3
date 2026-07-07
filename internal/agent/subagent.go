@@ -15,22 +15,36 @@ import (
 	"github.com/jonpo/cclient3/internal/tools"
 )
 
+// MaxSubAgentDepth is how many levels of delegation are allowed below the
+// main agent: 2 means main → sub-agent → sub-sub-agent, then leaf.
+const MaxSubAgentDepth = 2
+
+// subAgentIDs issues globally unique sub-agent IDs across all nesting levels,
+// so nested agents never collide on tab IDs.
+var subAgentIDs atomic.Int64
+
+func nextSubAgentID() int64 { return subAgentIDs.Add(1) }
+
 // SubAgentTool spawns a fully autonomous child agent.
-// Multiple sub_agent calls in one response execute in parallel.
+// Multiple sub_agent calls in one response execute in parallel, and spawned
+// agents may delegate one further level (up to MaxSubAgentDepth).
 type SubAgentTool struct {
 	providers *api.ProviderRegistry
 	cfg       *config.Config
-	registry  *tools.Registry // child registry — no sub_agent
+	registry  *tools.Registry // tools available to spawned agents
 	executor  *tools.Executor
 	msgChan   chan tea.Msg
-	counter   atomic.Int64
+	depth     int // nesting level of agents this tool spawns (1 = child of main agent)
 }
 
+// NewSubAgentTool creates the delegation tool. childRegistry is the tool set
+// the spawned agents receive; depth is the nesting level of those agents.
 func NewSubAgentTool(
 	providers *api.ProviderRegistry,
 	cfg *config.Config,
 	childRegistry *tools.Registry,
 	msgChan chan tea.Msg,
+	depth int,
 ) *SubAgentTool {
 	return &SubAgentTool{
 		providers: providers,
@@ -38,12 +52,21 @@ func NewSubAgentTool(
 		registry:  childRegistry,
 		executor:  tools.NewExecutor(childRegistry, 6),
 		msgChan:   msgChan,
+		depth:     depth,
 	}
 }
 
 func (t *SubAgentTool) Name() string { return "sub_agent" }
 
 func (t *SubAgentTool) Description() string {
+	nesting := `Sub-agents at this level can themselves call sub_agent to delegate one
+further level down — useful for large tasks that decompose into groups of
+independent sub-tasks. Depth is capped, so keep hierarchies shallow.`
+	if t.depth >= MaxSubAgentDepth {
+		nesting = `Sub-agents at this level CANNOT spawn further sub-agents — the maximum
+delegation depth has been reached. Give them directly executable tasks.`
+	}
+
 	return `Spawn a fully autonomous sub-agent to complete a task independently.
 
 The sub-agent has its own conversation context and access to all tools
@@ -52,6 +75,8 @@ It runs its own tool-use loop until it produces a final answer.
 
 Multiple sub_agent calls in a single response run IN PARALLEL — use this
 to decompose complex work into concurrent workstreams.
+
+` + nesting + `
 
 Optionally specify 'provider' to route this agent to a different backend:
   - "anthropic" (default): full Claude API access
@@ -62,7 +87,7 @@ Optionally specify 'model' to route by task difficulty:
   - claude-opus-4-8: most capable (default) — coding, design, hard reasoning
   - claude-sonnet-5: near-Opus quality at lower cost — balanced sub-tasks
   - claude-haiku-4-5: fast and cheap — parsing, summarising, formatting,
-    light research
+    light research (or use the shorthand "fast")
 
 The sub-agent's final answer is returned as a tool result string.`
 }
@@ -151,7 +176,10 @@ func (t *SubAgentTool) Execute(ctx context.Context, input json.RawMessage) tools
 		}
 	}
 
-	id := fmt.Sprintf("agent-%d", t.counter.Add(1))
+	id := fmt.Sprintf("agent-%d", nextSubAgentID())
+	if t.depth > 1 {
+		id = fmt.Sprintf("%s.d%d", id, t.depth) // mark nested agents in tab labels
+	}
 	t.send(display.SubAgentStartMsg{
 		ID:       id,
 		Task:     params.Task,

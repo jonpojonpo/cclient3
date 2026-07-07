@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/jonpo/cclient3/internal/api"
@@ -62,20 +63,14 @@ func TestSubAgentTool_Metadata(t *testing.T) {
 	}
 }
 
-// TestSubAgentTool_CounterIncrements verifies each Execute call gets a unique ID.
-func TestSubAgentTool_CounterIncrements(t *testing.T) {
-	// We only test the counter logic, not actual API calls.
-	tool := &SubAgentTool{}
-	before := tool.counter.Load()
-
-	// Even though Execute will fail (no client), the counter increments before the call.
-	// We test the counter directly.
-	id1 := tool.counter.Add(1)
-	id2 := tool.counter.Add(1)
+// TestSubAgentIDs_Unique verifies IDs are unique across tool instances
+// (nested sub-agent tools share one global counter so tab IDs never collide).
+func TestSubAgentIDs_Unique(t *testing.T) {
+	id1 := nextSubAgentID()
+	id2 := nextSubAgentID()
 	if id2 <= id1 {
-		t.Error("counter should increment monotonically")
+		t.Error("sub-agent IDs should increment monotonically across instances")
 	}
-	_ = before
 }
 
 // TestNewSubAgentTool verifies the constructor wires fields correctly.
@@ -85,7 +80,7 @@ func TestNewSubAgentTool_Constructor(t *testing.T) {
 	cfg := config.DefaultConfig()
 	reg := tools.NewRegistry()
 
-	tool := NewSubAgentTool(providers, cfg, reg, nil)
+	tool := NewSubAgentTool(providers, cfg, reg, nil, 1)
 	if tool == nil {
 		t.Fatal("NewSubAgentTool returned nil")
 	}
@@ -100,5 +95,50 @@ func TestNewSubAgentTool_Constructor(t *testing.T) {
 	}
 	if tool.executor == nil {
 		t.Error("executor should be initialized")
+	}
+}
+
+// TestSubAgentTool_DepthAwareDescription verifies the tool tells agents at
+// the max depth that they cannot delegate further.
+func TestSubAgentTool_DepthAwareDescription(t *testing.T) {
+	mid := &SubAgentTool{depth: 1}
+	leaf := &SubAgentTool{depth: MaxSubAgentDepth}
+
+	if !strings.Contains(mid.Description(), "delegate one") {
+		t.Error("depth-1 description should say further delegation is allowed")
+	}
+	if !strings.Contains(leaf.Description(), "CANNOT spawn further") {
+		t.Error("max-depth description should forbid further delegation")
+	}
+}
+
+// TestNewAgent_RegistryChain verifies the main agent exposes sub_agent, and
+// that the chain terminates: the deepest registry has no sub_agent tool.
+func TestNewAgent_RegistryChain(t *testing.T) {
+	client := api.NewClient("key", "https://example.com")
+	providers := api.NewProviderRegistry(client)
+	cfg := config.DefaultConfig()
+
+	ag := NewAgent(cfg, providers, nil)
+	defer ag.Shutdown()
+
+	// Walk the chain: main registry → depth-1 children → depth-2 children.
+	reg := ag.registry
+	for depth := 1; depth <= MaxSubAgentDepth; depth++ {
+		toolIface, err := reg.Get("sub_agent")
+		if err != nil {
+			t.Fatalf("registry at depth %d should expose sub_agent: %v", depth-1, err)
+		}
+		sat, ok := toolIface.(*SubAgentTool)
+		if !ok {
+			t.Fatalf("sub_agent has unexpected type %T", toolIface)
+		}
+		if sat.depth != depth {
+			t.Errorf("sub_agent spawns depth %d, want %d", sat.depth, depth)
+		}
+		reg = sat.registry
+	}
+	if _, err := reg.Get("sub_agent"); err == nil {
+		t.Errorf("leaf registry (depth %d) must not expose sub_agent", MaxSubAgentDepth)
 	}
 }

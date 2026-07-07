@@ -25,6 +25,7 @@ Think of it as a local Claude Code you can hack on yourself.
 
 ### Dynamic workflows
 - **Parallel sub-agents** — the agent decomposes big tasks into concurrent workstreams via the `sub_agent` tool; each sub-agent streams into its own tab
+- **Sub-sub-agents** — sub-agents can delegate one further level down (max depth 2), so very large tasks decompose into a shallow tree of parallel workers; the leaf level is tool-only
 - **Effort-tiered routing** — sub-tasks are routed to the cheapest capable model: `fast` shorthand dispatches to the configured `fast_model` (default `claude-haiku-4-5`) for parsing/summarising/light research, while hard reasoning stays on the default model
 - **Cross-provider delegation** — sub-agents can run on a different backend (`provider: ollama` for local inference, `provider: openai`)
 - **Parallel tool execution** — independent tool calls in one response run concurrently via a bounded semaphore pool
@@ -181,9 +182,9 @@ api_endpoint: https://api.anthropic.com/v1/messages
 
 # Multi-provider support
 ollama_endpoint: http://localhost:11434
-ollama_model: qwen3.5:9b
+ollama_model: qwen3.6:27b      # best local coding model for a 24GB card
 openai_endpoint: https://api.openai.com
-openai_model: gpt-5.4
+openai_model: gpt-5.5
 default_provider: anthropic    # anthropic | openai | ollama
 
 system_prompt: |
@@ -255,7 +256,10 @@ Main agent (claude-opus-4-8, adaptive thinking)
 sub_agent     sub_agent     sub_agent      (parallel tool calls)
 "fast" model  default       provider:ollama
   ↓             ↓             ↓
-own tab       own tab       own tab        (concurrent streaming)
+own tab      ┌─┴─┐          own tab        (concurrent streaming)
+             ↓   ↓
+        sub-sub  sub-sub                   (optional depth-2 delegation;
+        agent    agent                      leaf level is tool-only)
   └─────────────┴─────────────┘
     ↓ results return as tool_results
 Main agent synthesizes → final answer

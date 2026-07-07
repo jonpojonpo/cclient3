@@ -33,28 +33,28 @@ func NewAgent(cfg *config.Config, providers *api.ProviderRegistry, msgChan chan 
 	sessions := tools.NewSessionManager()
 	sessions.Prewarm("default", "scratch")
 
-	// Child registry: all base tools, but NO sub_agent.
-	childRegistry := tools.NewRegistry()
-	childRegistry.Register(tools.NewBashTool(cfg.BashTimeout, sessions))
-	childRegistry.Register(tools.NewFileReadTool())
-	childRegistry.Register(tools.NewFileWriteTool())
-	childRegistry.Register(tools.NewFileEditTool())
-	childRegistry.Register(tools.NewGlobTool())
-	childRegistry.Register(tools.NewGrepTool())
-	childRegistry.Register(tools.NewWebFetchTool())
-	childRegistry.Register(tools.NewWebSearchTool())
+	newBaseRegistry := func() *tools.Registry {
+		r := tools.NewRegistry()
+		r.Register(tools.NewBashTool(cfg.BashTimeout, sessions))
+		r.Register(tools.NewFileReadTool())
+		r.Register(tools.NewFileWriteTool())
+		r.Register(tools.NewFileEditTool())
+		r.Register(tools.NewGlobTool())
+		r.Register(tools.NewGrepTool())
+		r.Register(tools.NewWebFetchTool())
+		r.Register(tools.NewWebSearchTool())
+		return r
+	}
 
-	// Parent registry: all base tools + sub_agent.
-	registry := tools.NewRegistry()
-	registry.Register(tools.NewBashTool(cfg.BashTimeout, sessions))
-	registry.Register(tools.NewFileReadTool())
-	registry.Register(tools.NewFileWriteTool())
-	registry.Register(tools.NewFileEditTool())
-	registry.Register(tools.NewGlobTool())
-	registry.Register(tools.NewGrepTool())
-	registry.Register(tools.NewWebFetchTool())
-	registry.Register(tools.NewWebSearchTool())
-	registry.Register(NewSubAgentTool(providers, cfg, childRegistry, msgChan))
+	// Registry chain: main agent → sub-agents (depth 1) → sub-sub-agents
+	// (depth 2, leaf — no further delegation). Built leaf-first.
+	childRegistry := newBaseRegistry() // deepest level: base tools only
+	for depth := MaxSubAgentDepth; depth >= 1; depth-- {
+		r := newBaseRegistry()
+		r.Register(NewSubAgentTool(providers, cfg, childRegistry, msgChan, depth))
+		childRegistry = r
+	}
+	registry := childRegistry // registry for the main agent (depth 0)
 
 	hooks := NewHookRegistry()
 	hooks.RegisterPreToolUse("bash", DefaultBashSafetyHook())

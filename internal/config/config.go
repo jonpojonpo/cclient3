@@ -46,9 +46,9 @@ func DefaultConfig() *Config {
 		ContextSize:        1000000,
 		APIEndpoint:        "https://api.anthropic.com/v1/messages",
 		OllamaEndpoint:     "http://localhost:11434",
-		OllamaModel:        "qwen3.5:9b",
+		OllamaModel:        "qwen3.6:27b",
 		OpenAIEndpoint:     "https://api.openai.com",
-		OpenAIModel:        "gpt-5.4",
+		OpenAIModel:        "gpt-5.5",
 		DefaultProvider:    "anthropic",
 		SystemPrompt:       defaultSystemPrompt,
 	}
@@ -69,7 +69,9 @@ Decompose work to fit the task, not a fixed script:
 - Route sub-tasks to the cheapest model that can do them well: use a fast
   model for parsing, summarising, formatting, or light research, and the
   default model for design, coding, and complex reasoning.
-- Sub-agents cannot spawn further sub-agents.
+- Sub-agents can themselves delegate one further level (sub-sub-agents) for
+  very large tasks; depth is capped, so keep hierarchies shallow and prefer
+  wide, parallel fan-out over deep nesting.
 
 ## Working style
 When you have enough information to act, act — don't re-derive established
