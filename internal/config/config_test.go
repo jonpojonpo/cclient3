@@ -15,8 +15,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.MaxTokens <= 0 {
 		t.Errorf("default MaxTokens = %d, want > 0", cfg.MaxTokens)
 	}
-	if cfg.Temperature < 0 || cfg.Temperature > 2 {
-		t.Errorf("default Temperature = %f, want 0..2", cfg.Temperature)
+	if cfg.FastModel == "" {
+		t.Error("default FastModel should not be empty")
 	}
 	if cfg.Theme == "" {
 		t.Error("default theme should not be empty")
@@ -60,7 +60,7 @@ func TestLoad_YAMLFile(t *testing.T) {
 	cfgPath := filepath.Join(dir, "config.yaml")
 	yamlContent := `model: claude-test-model
 max_tokens: 4096
-temperature: 0.5
+effort: medium
 theme: ocean
 `
 	if err := os.WriteFile(cfgPath, []byte(yamlContent), 0o644); err != nil {
@@ -82,11 +82,31 @@ theme: ocean
 	if cfg.MaxTokens != 4096 {
 		t.Errorf("MaxTokens = %d, want 4096", cfg.MaxTokens)
 	}
-	if cfg.Temperature != 0.5 {
-		t.Errorf("Temperature = %f, want 0.5", cfg.Temperature)
+	if cfg.Effort != "medium" {
+		t.Errorf("Effort = %q, want medium", cfg.Effort)
 	}
 	if cfg.Theme != "ocean" {
 		t.Errorf("Theme = %q, want ocean", cfg.Theme)
+	}
+}
+
+func TestModelFor(t *testing.T) {
+	cfg := DefaultConfig()
+
+	if got := cfg.ModelFor("anthropic"); got != cfg.Model {
+		t.Errorf("ModelFor(anthropic) = %q, want %q", got, cfg.Model)
+	}
+	// Claude model IDs must never be sent to other backends.
+	if got := cfg.ModelFor("ollama"); got != cfg.OllamaModel {
+		t.Errorf("ModelFor(ollama) = %q, want %q", got, cfg.OllamaModel)
+	}
+	if got := cfg.ModelFor("openai"); got != cfg.OpenAIModel {
+		t.Errorf("ModelFor(openai) = %q, want %q", got, cfg.OpenAIModel)
+	}
+	// An explicit non-Claude model wins regardless of provider.
+	cfg.Model = "llama3:70b"
+	if got := cfg.ModelFor("ollama"); got != "llama3:70b" {
+		t.Errorf("ModelFor(ollama) with explicit model = %q, want llama3:70b", got)
 	}
 }
 

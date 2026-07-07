@@ -27,10 +27,71 @@ func NewClient(apiKey, endpoint string) *Client {
 	}
 }
 
+// supportsAdaptiveThinking reports whether a model accepts
+// thinking: {type: "adaptive"} (Claude 4.6-family and newer).
+func supportsAdaptiveThinking(model string) bool {
+	for _, prefix := range []string{
+		"claude-fable-5",
+		"claude-mythos",
+		"claude-opus-4-8",
+		"claude-opus-4-7",
+		"claude-opus-4-6",
+		"claude-sonnet-5",
+		"claude-sonnet-4-6",
+	} {
+		if strings.HasPrefix(model, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// supportsSummarizedDisplay reports whether thinking.display is a valid
+// parameter (Opus 4.7+, Sonnet 5, Fable 5). On these models thinking text
+// defaults to omitted, so we opt back into summaries for the TUI.
+func supportsSummarizedDisplay(model string) bool {
+	for _, prefix := range []string{
+		"claude-fable-5",
+		"claude-mythos",
+		"claude-opus-4-8",
+		"claude-opus-4-7",
+		"claude-sonnet-5",
+	} {
+		if strings.HasPrefix(model, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// supportsEffort reports whether output_config.effort is accepted.
+func supportsEffort(model string) bool {
+	return supportsAdaptiveThinking(model) || strings.HasPrefix(model, "claude-opus-4-5")
+}
+
+// applyModelDefaults adjusts the request for the target model's API surface:
+// enables adaptive thinking where supported and strips parameters the model
+// would reject with a 400.
+func applyModelDefaults(req *Request) {
+	if req.Thinking == nil && supportsAdaptiveThinking(req.Model) {
+		req.Thinking = &ThinkingConfig{Type: "adaptive"}
+		if supportsSummarizedDisplay(req.Model) {
+			req.Thinking.Display = "summarized"
+		}
+	}
+	if req.Thinking != nil && !supportsAdaptiveThinking(req.Model) {
+		req.Thinking = nil
+	}
+	if req.OutputConfig != nil && req.OutputConfig.Effort != "" && !supportsEffort(req.Model) {
+		req.OutputConfig = nil
+	}
+}
+
 // doPost marshals req, POSTs to c.endpoint, and returns the open response body.
 // The caller is responsible for closing the body. On non-200 the body is closed
 // and an error is returned.
 func (c *Client) doPost(ctx context.Context, req *Request) (*http.Response, error) {
+	applyModelDefaults(req)
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
@@ -179,7 +240,6 @@ func (c *Client) setHeaders(req *http.Request) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", c.apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
-	req.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
 }
 
 func (c *Client) parseError(resp *http.Response) error {
@@ -191,4 +251,3 @@ func (c *Client) parseError(resp *http.Response) error {
 	}
 	return &apiErr
 }
-

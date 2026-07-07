@@ -55,15 +55,14 @@ to decompose complex work into concurrent workstreams.
 
 Optionally specify 'provider' to route this agent to a different backend:
   - "anthropic" (default): full Claude API access
-  - "openai": OpenAI API models (uses configured openai_model, e.g. gpt-5.4)
-  - "ollama": local inference (uses configured ollama_model, e.g. qwen3.5:9b)
+  - "openai": OpenAI API models (uses the configured openai_model)
+  - "ollama": local inference (uses the configured ollama_model)
 
-Optionally specify 'model' to use a specific model:
-  - claude-sonnet-4-6: best capability (default)
-  - claude-haiku-4-5-20251001: fast and cheap — ideal for simple sub-tasks
-    like parsing, summarising, formatting, or light research
-  - gpt-5.4: default OpenAI model for high-capability sub-tasks
-  - qwen3.5:9b: local/offline via ollama
+Optionally specify 'model' to route by task difficulty:
+  - claude-opus-4-8: most capable (default) — coding, design, hard reasoning
+  - claude-sonnet-5: near-Opus quality at lower cost — balanced sub-tasks
+  - claude-haiku-4-5: fast and cheap — parsing, summarising, formatting,
+    light research
 
 The sub-agent's final answer is returned as a tool result string.`
 }
@@ -78,7 +77,7 @@ func (t *SubAgentTool) InputSchema() json.RawMessage {
 			},
 			"model": {
 				"type": "string",
-				"description": "Optional model override (e.g. use a faster model for simple sub-tasks). Defaults to the parent model."
+				"description": "Optional model override. Use the shorthand 'fast' for the configured fast/cheap model — ideal for simple sub-tasks. Defaults to the parent model."
 			},
 			"provider": {
 				"type": "string",
@@ -122,14 +121,11 @@ func (t *SubAgentTool) Execute(ctx context.Context, input json.RawMessage) tools
 	providerName := provider.Name()
 
 	model := params.Model
-	if model == "" {
-		if providerName == "ollama" && t.cfg.OllamaModel != "" {
-			model = t.cfg.OllamaModel
-		} else if providerName == "openai" && t.cfg.OpenAIModel != "" {
-			model = t.cfg.OpenAIModel
-		} else {
-			model = t.cfg.Model
-		}
+	switch {
+	case model == "":
+		model = t.cfg.ModelFor(providerName)
+	case model == "fast" && t.cfg.FastModel != "":
+		model = t.cfg.FastModel
 	}
 
 	// For Ollama, validate that the model actually exists before spawning.

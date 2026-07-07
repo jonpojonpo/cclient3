@@ -3,37 +3,28 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
-// EnsembleAgentDef defines a single agent in an ensemble preset.
-type EnsembleAgentDef struct {
-	Name        string `yaml:"name"`
-	Personality string `yaml:"personality"`
-	Model       string `yaml:"model"`
-	Provider    string `yaml:"provider"`
-	Color       string `yaml:"color"`
-}
-
-// EnsemblePreset is a named group of agents for ensemble mode.
-type EnsemblePreset struct {
-	Name   string             `yaml:"name"`
-	Agents []EnsembleAgentDef `yaml:"agents"`
-}
-
 type Config struct {
-	Model              string  `yaml:"model"`
-	MaxTokens          int     `yaml:"max_tokens"`
-	Temperature        float64 `yaml:"temperature"`
-	Theme              string  `yaml:"theme"`
-	MaxToolConcurrency int     `yaml:"max_tool_concurrency"`
-	BashTimeout        int     `yaml:"bash_timeout"`
-	APIEndpoint        string  `yaml:"api_endpoint"`
-	SystemPrompt       string  `yaml:"system_prompt"`
-	APIKey             string  `yaml:"-"`
+	Model              string `yaml:"model"`
+	MaxTokens          int    `yaml:"max_tokens"`
+	Theme              string `yaml:"theme"`
+	MaxToolConcurrency int    `yaml:"max_tool_concurrency"`
+	BashTimeout        int    `yaml:"bash_timeout"`
+	APIEndpoint        string `yaml:"api_endpoint"`
+	SystemPrompt       string `yaml:"system_prompt"`
+	APIKey             string `yaml:"-"`
+	// Effort controls reasoning depth vs cost on models that support it
+	// (low | medium | high | xhigh | max). Empty uses the API default (high).
+	Effort string `yaml:"effort"`
+	// FastModel is used for lightweight sub-tasks (delegation, summarising).
+	FastModel string `yaml:"fast_model"`
 	// ContextSize is the model's context window in tokens. Used for conversation
-	// trimming. Default 190000 suits Claude; set lower for Ollama (e.g. 8192).
+	// trimming. Default 1000000 suits current Claude models; set lower for
+	// Ollama (e.g. 8192).
 	ContextSize int `yaml:"context_size"`
 	// Local / alternative provider settings
 	OllamaEndpoint  string `yaml:"ollama_endpoint"`
@@ -42,28 +33,49 @@ type Config struct {
 	OpenAIModel     string `yaml:"openai_model"`
 	DefaultProvider string `yaml:"default_provider"`
 	OpenAIAPIKey    string `yaml:"-"`
-	// Ensemble mode presets
-	EnsemblePresets []EnsemblePreset `yaml:"ensemble_presets"`
 }
 
 func DefaultConfig() *Config {
 	return &Config{
-		Model:              "claude-sonnet-4-6",
-		MaxTokens:          8192,
-		Temperature:        0.7,
+		Model:              "claude-opus-4-8",
+		FastModel:          "claude-haiku-4-5",
+		MaxTokens:          16384,
 		Theme:              "cyber",
 		MaxToolConcurrency: 6,
 		BashTimeout:        120,
-		ContextSize:        190000,
+		ContextSize:        1000000,
 		APIEndpoint:        "https://api.anthropic.com/v1/messages",
 		OllamaEndpoint:     "http://localhost:11434",
 		OllamaModel:        "qwen3.5:9b",
 		OpenAIEndpoint:     "https://api.openai.com",
 		OpenAIModel:        "gpt-5.4",
 		DefaultProvider:    "anthropic",
-		SystemPrompt:       "You are a helpful AI assistant with access to tools for reading, writing, and searching files, running bash commands, and more. Use tools when appropriate to help the user.",
+		SystemPrompt:       defaultSystemPrompt,
 	}
 }
+
+const defaultSystemPrompt = `You are a powerful AI agent with access to tools for reading, writing, and
+searching files, running bash commands, fetching web pages, and spawning
+autonomous sub-agents.
+
+## Dynamic workflows
+Decompose work to fit the task, not a fixed script:
+- Independent tool calls (reads, greps, searches) belong in the SAME response —
+  they run in parallel.
+- Use the sub_agent tool to delegate self-contained or parallelisable
+  workstreams. Multiple sub_agent calls in one response run concurrently.
+  Give each sub-agent a complete, self-contained task description — it cannot
+  see this conversation.
+- Route sub-tasks to the cheapest model that can do them well: use a fast
+  model for parsing, summarising, formatting, or light research, and the
+  default model for design, coding, and complex reasoning.
+- Sub-agents cannot spawn further sub-agents.
+
+## Working style
+When you have enough information to act, act — don't re-derive established
+facts or narrate options you won't pursue. Verify your work with tools
+(run the code, re-read the file) before declaring it done. Report outcomes
+faithfully: if something failed, say so with the evidence. Be concise.`
 
 func Load() (*Config, error) {
 	cfg := DefaultConfig()
@@ -100,4 +112,25 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// ModelFor resolves the model to use for a given provider. If the configured
+// Model is a Claude model but the provider is ollama/openai, fall back to that
+// provider's configured model — sending a Claude model ID to another backend
+// is always an error.
+func (c *Config) ModelFor(provider string) string {
+	if !strings.HasPrefix(c.Model, "claude-") {
+		return c.Model // user explicitly picked a non-Claude model
+	}
+	switch provider {
+	case "ollama":
+		if c.OllamaModel != "" {
+			return c.OllamaModel
+		}
+	case "openai":
+		if c.OpenAIModel != "" {
+			return c.OpenAIModel
+		}
+	}
+	return c.Model
 }

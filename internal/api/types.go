@@ -10,13 +10,26 @@ type CacheControl struct {
 }
 
 type Request struct {
-	Model       string          `json:"model"`
-	MaxTokens   int             `json:"max_tokens"`
-	Temperature float64         `json:"temperature,omitempty"`
-	System      interface{}     `json:"system,omitempty"` // string or []SystemBlock
-	Messages    []Message       `json:"messages"`
-	Tools       []ToolDef       `json:"tools,omitempty"`
-	Stream      bool            `json:"stream"`
+	Model        string          `json:"model"`
+	MaxTokens    int             `json:"max_tokens"`
+	System       interface{}     `json:"system,omitempty"` // string or []SystemBlock
+	Messages     []Message       `json:"messages"`
+	Tools        []ToolDef       `json:"tools,omitempty"`
+	Thinking     *ThinkingConfig `json:"thinking,omitempty"`
+	OutputConfig *OutputConfig   `json:"output_config,omitempty"`
+	Stream       bool            `json:"stream"`
+}
+
+// ThinkingConfig controls the model's reasoning mode. Modern Claude models
+// (4.6+) use adaptive thinking: the model decides when and how much to think.
+type ThinkingConfig struct {
+	Type    string `json:"type"`              // "adaptive"
+	Display string `json:"display,omitempty"` // "summarized" to receive readable reasoning
+}
+
+// OutputConfig carries output-level controls such as the effort parameter.
+type OutputConfig struct {
+	Effort string `json:"effort,omitempty"` // low | medium | high | xhigh | max
 }
 
 // SystemBlock is a content block for the system prompt (used when cache_control is needed).
@@ -37,8 +50,9 @@ type ContentBlock struct {
 	// text
 	Text string `json:"text,omitempty"`
 
-	// thinking
-	Thinking string `json:"thinking,omitempty"`
+	// thinking — Signature must be echoed back verbatim on multi-turn replay
+	Thinking  string `json:"thinking,omitempty"`
+	Signature string `json:"signature,omitempty"`
 
 	// tool_use
 	ID    string          `json:"id,omitempty"`
@@ -81,7 +95,8 @@ type ResponseBlock struct {
 	Text string `json:"text,omitempty"`
 
 	// thinking block
-	Thinking string `json:"thinking,omitempty"`
+	Thinking  string `json:"thinking,omitempty"`
+	Signature string `json:"signature,omitempty"`
 
 	// tool_use block
 	ID    string          `json:"id,omitempty"`
@@ -109,8 +124,8 @@ type MessageStartEvent struct {
 }
 
 type ContentBlockStartEvent struct {
-	Type         string       `json:"type"`
-	Index        int          `json:"index"`
+	Type         string        `json:"type"`
+	Index        int           `json:"index"`
 	ContentBlock ResponseBlock `json:"content_block"`
 }
 
@@ -128,6 +143,9 @@ type DeltaBlock struct {
 
 	// thinking_delta
 	Thinking string `json:"thinking,omitempty"`
+
+	// signature_delta
+	Signature string `json:"signature,omitempty"`
 
 	// input_json_delta
 	PartialJSON string `json:"partial_json,omitempty"`

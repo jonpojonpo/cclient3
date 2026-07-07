@@ -1,4 +1,4 @@
-# cclient3 — Terminal AI Agent with Ensemble Mode
+# cclient3 — Multi-Provider Terminal AI Agent
 # Generate the demo GIF: vhs demo.tape
 # Requires: cclient3 binary built, ANTHROPIC_API_KEY set
 
@@ -26,47 +26,31 @@ Type "cclient3"
 Enter
 Sleep 2s
 
-# --- Show /help to display all commands including ensemble ---
+# --- Show /help to display all commands ---
 Type "/help"
 Enter
 Sleep 3s
 
-# --- List available ensemble presets ---
-Type "/ensembles"
+# --- List registered providers ---
+Type "/providers"
 Enter
 Sleep 2s
 
-# --- Show ensemble command usage ---
-Type "/ensemble"
-Enter
-Sleep 2s
-
-# --- Launch an ensemble discussion with default agents ---
-Type@80ms "/ensemble What are the tradeoffs between microservices and monoliths for a startup?"
+# --- Ask the agent something that fans out to parallel sub-agents ---
+Type@80ms "Survey this repo: spawn one sub-agent to summarise the Go packages and another to review the README, then combine their findings."
 Sleep 600ms
 Enter
 
-# Agents respond in parallel — watch the Ensemble tab fill up
-Sleep 10s
-
-# --- User adds a follow-up message in the group chat ---
-Type@60ms "Good points! What about developer experience and debugging complexity?"
-Sleep 400ms
-Enter
-Sleep 8s
-
-# --- End the ensemble session ---
-Type "/done"
-Enter
-Sleep 2s
+# Sub-agents stream into their own tabs — watch the tab bar
+Sleep 15s
 
 # --- Switch back to Chat tab ---
 Type "/tab 1"
 Enter
 Sleep 1s
 
-# --- Normal chat still works alongside ensemble ---
-Type@60ms "Summarize the key takeaways from our ensemble discussion"
+# --- Normal chat continues ---
+Type@60ms "Now give me a one-paragraph executive summary"
 Enter
 Sleep 6s
 

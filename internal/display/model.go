@@ -152,8 +152,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Tab navigation (Alt+N, Alt+[/], Alt+←/→, Alt+w, Alt+p)
 		if m.handleTabKeys(msg) {
-			active := m.activeTab()
-			if m.tabs.ActiveIdx() == 0 || active.Kind == TabEnsemble {
+			if m.tabs.ActiveIdx() == 0 {
 				m.textarea.Focus()
 			} else {
 				m.textarea.Blur()
@@ -167,19 +166,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case tea.KeyEnter:
-			active := m.activeTab()
-			// Ensemble tab: send to ensemble input channel
-			if !msg.Alt && active.Kind == TabEnsemble && active.EnsembleInputChan != nil {
-				text := strings.TrimSpace(m.textarea.Value())
-				if text != "" {
-					m.textarea.Reset()
-					m.textareaRows = 1
-					m.textarea.SetHeight(1)
-					active.history = append(active.history, historyEntry{content: m.renderEnsembleUserPanel(text)})
-					m.scrollToBottom()
-					active.EnsembleInputChan <- text
-				}
-			} else if !msg.Alt && chat.state == stateIdle && m.tabs.ActiveIdx() == 0 {
+			if !msg.Alt && chat.state == stateIdle && m.tabs.ActiveIdx() == 0 {
 				// Plain Enter (not Alt) on the chat tab = submit
 				text := strings.TrimSpace(m.textarea.Value())
 				if text != "" {
@@ -261,10 +248,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		default:
-			// Pass all other keys to textarea when on chat tab (idle) or ensemble tab
-			active := m.activeTab()
-			canType := (chat.state == stateIdle && m.tabs.ActiveIdx() == 0) ||
-				active.Kind == TabEnsemble
+			// Pass all other keys to textarea when on chat tab (idle)
+			canType := chat.state == stateIdle && m.tabs.ActiveIdx() == 0
 			if canType {
 				prevLen := len(m.textarea.Value())
 				var cmd tea.Cmd
@@ -557,114 +542,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingConfirm = &msg
 		cmds = append(cmds, m.waitForAgentMsg())
 
-	// --- Ensemble tab messages ---
-
-	case EnsembleStartMsg:
-		scheduleWait = true
-		ensTab := &Tab{
-			ID:                "ensemble-" + msg.TabID,
-			Label:             "Ensemble",
-			Kind:              TabEnsemble,
-			Status:            TabRunning,
-			EnsembleInputChan: msg.UserChan,
-			agentCount:        len(msg.Agents),
-		}
-		ensTab.history = append(ensTab.history, historyEntry{
-			content: m.renderEnsembleHeader(msg.Agents),
-		})
-		ensTab.history = append(ensTab.history, historyEntry{
-			content: m.renderEnsembleUserPanel(msg.Prompt),
-		})
-		idx := m.tabs.Add(ensTab)
-		m.tabs.SetActive(idx)
-		m.textarea.Focus()
-		m.scrollToBottom()
-
-	case EnsembleUserMsg:
-		scheduleWait = true
-		if tab, _ := m.tabs.FindByID(msg.TabID); tab != nil {
-			tab.history = append(tab.history, historyEntry{
-				content: m.renderEnsembleUserPanel(msg.Text),
-			})
-			if m.tabs.Active() != tab {
-				tab.Unread = true
-			}
-		}
-
-	case EnsembleSpeakerMsg:
-		scheduleWait = true
-		if tab, _ := m.tabs.FindByID(msg.TabID); tab != nil {
-			tab.state = stateStreaming
-			tab.currentSpeaker = msg.Speaker
-			tab.currentColor = msg.Color
-			tab.currentText.Reset()
-			if m.tabs.Active() != tab {
-				tab.Unread = true
-			}
-		}
-
-	case EnsembleTextDeltaMsg:
-		scheduleWait = true
-		if tab, _ := m.tabs.FindByID(msg.TabID); tab != nil {
-			tab.state = stateStreaming
-			tab.currentSpeaker = msg.Speaker
-			tab.currentColor = msg.Color
-			tab.currentText.WriteString(msg.Text)
-			if m.tabs.Active() != tab {
-				tab.Unread = true
-			}
-		}
-
-	case EnsembleTurnDoneMsg:
-		scheduleWait = true
-		if tab, _ := m.tabs.FindByID(msg.TabID); tab != nil {
-			if tab.currentText.Len() > 0 {
-				tab.history = append(tab.history, historyEntry{
-					content: m.renderEnsembleSpeakerPanel(tab.currentSpeaker, tab.currentText.String(), tab.currentColor),
-				})
-				tab.currentText.Reset()
-			}
-			tab.currentSpeaker = ""
-			tab.currentColor = ""
-			tab.state = stateIdle
-			if len(tab.history) > 300 {
-				tab.history = tab.history[len(tab.history)-300:]
-			}
-		}
-
-	case EnsembleRoundDoneMsg:
-		scheduleWait = true
-		if tab, _ := m.tabs.FindByID(msg.TabID); tab != nil {
-			tab.state = stateIdle
-			sep := lipgloss.NewStyle().Foreground(m.theme.Dim).Render(
-				"  ─── Round complete. Type a message to continue, or /done to end. ───")
-			tab.history = append(tab.history, historyEntry{content: sep})
-		}
-
-	case EnsembleDoneMsg:
-		scheduleWait = true
-		if tab, _ := m.tabs.FindByID(msg.TabID); tab != nil {
-			tab.Status = TabDone
-			tab.state = stateIdle
-			if msg.Summary != "" {
-				tab.history = append(tab.history, historyEntry{
-					content: m.renderPanel(m.theme.Accent, "  Summary", msg.Summary),
-				})
-			}
-			done := lipgloss.NewStyle().Foreground(m.theme.Secondary).Render("  Ensemble session ended.")
-			tab.history = append(tab.history, historyEntry{content: done})
-		}
-
-	case EnsembleErrorMsg:
-		scheduleWait = true
-		if tab, _ := m.tabs.FindByID(msg.TabID); tab != nil {
-			tab.history = append(tab.history, historyEntry{
-				content: m.renderErrorPanel(msg.Err.Error()),
-			})
-			tab.Status = TabError
-			tab.state = stateIdle
-		}
-
 	case QuitMsg:
 		m.quitting = true
 		return m, tea.Quit
@@ -736,18 +613,6 @@ func (m *Model) View() string {
 			sections = append(sections, strings.Join(active.outputLines, "\n"))
 		}
 
-	case TabEnsemble:
-		for _, e := range active.history {
-			sections = append(sections, e.content)
-		}
-		if active.state == stateStreaming && active.currentText.Len() > 0 {
-			sections = append(sections, m.renderEnsembleSpeakerPanel(
-				active.currentSpeaker, active.currentText.String(), active.currentColor))
-		}
-		if active.state == stateStreaming || active.state == stateThinking {
-			sections = append(sections, fmt.Sprintf(" %s %s is responding...",
-				m.renderSpinner(), active.currentSpeaker))
-		}
 	}
 
 	body := strings.Join(sections, "\n")
@@ -793,8 +658,6 @@ func (m *Model) View() string {
 				lipgloss.NewStyle().Foreground(m.theme.Dim).Render("  (waiting for response...)"),
 			)
 		}
-	} else if active.Kind == TabEnsemble {
-		prompt = inputStyle.Render(m.textarea.View())
 	} else {
 		prompt = inputStyle.Render(
 			lipgloss.NewStyle().Foreground(m.theme.Dim).Render("  Alt+1: Chat  Alt+←/→: switch tabs"),
@@ -900,7 +763,7 @@ func (m *Model) handleTabKeys(msg tea.KeyMsg) bool {
 	return false
 }
 
-func (m *Model) scrollToBottom()             { m.activeTab().scrollOffset = 0 }
+func (m *Model) scrollToBottom()                { m.activeTab().scrollOffset = 0 }
 func (m *Model) visibleHistory() []historyEntry { return m.activeTab().history }
 
 func (m *Model) renderConfirmDialog() string {

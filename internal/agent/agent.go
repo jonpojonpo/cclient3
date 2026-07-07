@@ -85,10 +85,10 @@ func (a *Agent) askConfirm(prompt, command string) bool {
 	return <-a.confirmChan
 }
 
-func (a *Agent) Client() *api.ProviderRegistry { return a.providers }
-func (a *Agent) Conversation() *Conversation   { return a.conversation }
-func (a *Agent) Skills() *skills.Manager       { return a.skillsMgr }
-func (a *Agent) Config() *config.Config        { return a.config }
+func (a *Agent) Client() *api.ProviderRegistry   { return a.providers }
+func (a *Agent) Conversation() *Conversation     { return a.conversation }
+func (a *Agent) Skills() *skills.Manager         { return a.skillsMgr }
+func (a *Agent) Config() *config.Config          { return a.config }
 func (a *Agent) Sessions() *tools.SessionManager { return a.sessions }
 
 // Providers returns the provider registry for external callers (e.g. commands).
@@ -198,14 +198,17 @@ func (a *Agent) buildRequest() *api.Request {
 
 	messages := copyMessagesWithCache(a.conversation.Messages)
 
-	return &api.Request{
-		Model:       a.config.Model,
-		MaxTokens:   a.config.MaxTokens,
-		Temperature: a.config.Temperature,
-		System:      system,
-		Messages:    messages,
-		Tools:       toolDefs,
+	req := &api.Request{
+		Model:     a.config.ModelFor(a.providers.DefaultName()),
+		MaxTokens: a.config.MaxTokens,
+		System:    system,
+		Messages:  messages,
+		Tools:     toolDefs,
 	}
+	if a.config.Effort != "" {
+		req.OutputConfig = &api.OutputConfig{Effort: a.config.Effort}
+	}
+	return req
 }
 
 func copyMessagesWithCache(orig []api.Message) []api.Message {
@@ -266,11 +269,12 @@ type blockCollector struct {
 }
 
 type collectedBlock struct {
-	typ     string
-	text    string
-	id      string
-	name    string
-	jsonBuf string
+	typ       string
+	text      string
+	signature string
+	id        string
+	name      string
+	jsonBuf   string
 }
 
 func newBlockCollector(msgChan chan tea.Msg) *blockCollector {
@@ -324,6 +328,14 @@ func (c *blockCollector) OnThinkingDelta(index int, thinking string) {
 	}
 }
 
+func (c *blockCollector) OnSignatureDelta(index int, signature string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if index < len(c.blocks) {
+		c.blocks[index].signature += signature
+	}
+}
+
 func (c *blockCollector) OnInputJSONDelta(index int, partialJSON string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -370,7 +382,9 @@ func (c *blockCollector) buildAssistantBlocks() []api.ContentBlock {
 		case "text":
 			blocks = append(blocks, api.ContentBlock{Type: "text", Text: b.text})
 		case "thinking":
-			blocks = append(blocks, api.ContentBlock{Type: "thinking", Thinking: b.text})
+			// Thinking blocks must be echoed back verbatim (including the
+			// signature) for multi-turn tool use with adaptive thinking.
+			blocks = append(blocks, api.ContentBlock{Type: "thinking", Thinking: b.text, Signature: b.signature})
 		case "tool_use":
 			blocks = append(blocks, api.ContentBlock{
 				Type:  "tool_use",
@@ -422,7 +436,7 @@ func (a *Agent) RunSingleTurn(ctx context.Context, prompt string) (string, error
 				contentBlocks = append(contentBlocks, api.ContentBlock{Type: "text", Text: block.Text})
 				text += block.Text
 			case "thinking":
-				contentBlocks = append(contentBlocks, api.ContentBlock{Type: "thinking", Thinking: block.Thinking})
+				contentBlocks = append(contentBlocks, api.ContentBlock{Type: "thinking", Thinking: block.Thinking, Signature: block.Signature})
 			case "tool_use":
 				input := safeRawJSON(string(block.Input))
 				contentBlocks = append(contentBlocks, api.ContentBlock{

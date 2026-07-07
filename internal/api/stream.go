@@ -14,6 +14,7 @@ type StreamCallback interface {
 	OnContentBlockStart(index int, block ResponseBlock)
 	OnTextDelta(index int, text string)
 	OnThinkingDelta(index int, thinking string)
+	OnSignatureDelta(index int, signature string)
 	OnInputJSONDelta(index int, partialJSON string)
 	OnContentBlockStop(index int)
 	OnMessageDelta(delta MessageDelta, usage *Usage)
@@ -79,6 +80,8 @@ func dispatchEvent(eventType string, data []byte, cb StreamCallback) error {
 			cb.OnTextDelta(evt.Index, evt.Delta.Text)
 		case "thinking_delta":
 			cb.OnThinkingDelta(evt.Index, evt.Delta.Thinking)
+		case "signature_delta":
+			cb.OnSignatureDelta(evt.Index, evt.Delta.Signature)
 		case "input_json_delta":
 			cb.OnInputJSONDelta(evt.Index, evt.Delta.PartialJSON)
 		}

@@ -12,17 +12,19 @@ type pricingEntry struct {
 // Cache reads are billed at 10% of input rate; cache writes at 125%.
 // Local/Ollama models have zero cost and are not listed here.
 var modelPricing = map[string]pricingEntry{
-	"claude-opus-4-6":            {15.0, 75.0},
-	"claude-opus-4-5":            {15.0, 75.0},
-	"claude-sonnet-4-6":          {3.0, 15.0},
-	"claude-sonnet-4-5":          {3.0, 15.0},
-	"claude-haiku-4-5":           {0.80, 4.0},
-	"claude-haiku-4-5-20251001":  {0.80, 4.0},
-	"claude-3-5-sonnet-20241022": {3.0, 15.0},
-	"claude-3-5-haiku-20241022":  {0.80, 4.0},
-	"claude-3-opus-20240229":     {15.0, 75.0},
-	"claude-3-sonnet-20240229":   {3.0, 15.0},
-	"claude-3-haiku-20240307":    {0.25, 1.25},
+	"claude-fable-5":            {10.0, 50.0},
+	"claude-mythos-5":           {10.0, 50.0},
+	"claude-opus-4-8":           {5.0, 25.0},
+	"claude-opus-4-7":           {5.0, 25.0},
+	"claude-opus-4-6":           {5.0, 25.0},
+	"claude-opus-4-5":           {5.0, 25.0},
+	"claude-opus-4-1":           {15.0, 75.0},
+	"claude-sonnet-5":           {3.0, 15.0},
+	"claude-sonnet-4-6":         {3.0, 15.0},
+	"claude-sonnet-4-5":         {3.0, 15.0},
+	"claude-haiku-4-5":          {1.0, 5.0},
+	"claude-haiku-4-5-20251001": {1.0, 5.0},
+	"claude-3-haiku-20240307":   {0.25, 1.25},
 }
 
 // findPricing looks up pricing by exact match, then by prefix (strips date suffix).
